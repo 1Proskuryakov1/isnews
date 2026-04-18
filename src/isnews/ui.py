@@ -23,6 +23,11 @@ from src.isnews.model_evaluation import (
     ModelEvaluationResult,
     evaluate_trained_model,
 )
+from src.isnews.saved_artifacts_loading import (
+    SavedArtifactsLoadingError,
+    SavedArtifactsLoadingResult,
+    load_saved_artifacts,
+)
 from src.isnews.text_preprocessing import TextPreprocessingError, TextPreprocessingResult
 from src.isnews.text_preprocessing import preprocess_dataset
 from src.isnews.tfidf_vectorization import (
@@ -289,6 +294,44 @@ def _render_training_preview(
     )
 
 
+def _render_loaded_artifacts_preview(
+    loaded_artifacts_result: SavedArtifactsLoadingResult,
+) -> None:
+    """Показывает результат загрузки сохраненных артефактов модели и векторизатора."""
+    import streamlit as st
+
+    loading_report = loaded_artifacts_result.report
+
+    st.success(
+        "Сохраненные артефакты успешно загружены и проверены на совместимость."
+    )
+
+    metric_column_1, metric_column_2, metric_column_3, metric_column_4 = st.columns(4)
+    metric_column_1.metric("Классов", loading_report.class_count)
+    metric_column_2.metric("Размер словаря", loading_report.vocabulary_size)
+    metric_column_3.metric("Признаков в модели", loading_report.feature_count)
+    metric_column_4.metric(
+        "Размер coef_",
+        f"{loading_report.coefficient_shape[0]} x {loading_report.coefficient_shape[1]}",
+    )
+
+    for warning_message in loading_report.warning_messages:
+        st.warning(warning_message)
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- тип модели: `{loading_report.model_type}`;",
+                f"- тип векторизатора: `{loading_report.vectorizer_type}`;",
+                f"- классы модели: `{', '.join(loading_report.class_labels)}`;",
+                f"- загруженная модель: `{loaded_artifacts_result.paths.model_path}`;",
+                f"- загруженный векторизатор: `{loaded_artifacts_result.paths.vectorizer_path}`;",
+                f"- JSON-отчет о загрузке: `{loaded_artifacts_result.paths.report_path}`.",
+            ]
+        )
+    )
+
+
 def _render_evaluation_preview(
     evaluation_result: ModelEvaluationResult,
 ) -> None:
@@ -455,6 +498,14 @@ def _reset_training_state() -> None:
     st.session_state.training_result = None
     st.session_state.training_source_key = None
     _reset_evaluation_state()
+
+
+def _reset_saved_artifacts_state() -> None:
+    """Сбрасывает состояние загрузки сохраненных артефактов при смене выбранных файлов."""
+    import streamlit as st
+
+    st.session_state.loaded_artifacts_result = None
+    st.session_state.loaded_artifacts_selection_key = None
 
 
 def _reset_vectorization_state() -> None:
@@ -669,6 +720,90 @@ def _render_training_section(
         return
 
     _render_training_preview(training_result)
+
+
+def _render_saved_artifacts_loading_section() -> None:
+    """Отрисовывает блок загрузки сохраненных `.joblib`-артефактов без переобучения."""
+    import streamlit as st
+
+    if "loaded_artifacts_result" not in st.session_state:
+        st.session_state.loaded_artifacts_result = None
+    if "loaded_artifacts_selection_key" not in st.session_state:
+        st.session_state.loaded_artifacts_selection_key = None
+
+    model_paths = sorted(PROJECT_PATHS.classifiers_dir.glob("*.joblib"))
+    vectorizer_paths = sorted(PROJECT_PATHS.vectorizers_dir.glob("*.joblib"))
+
+    st.subheader("Загрузка сохраненных артефактов")
+    st.caption(
+        "Этот блок позволяет без переобучения выбрать ранее сохраненные `.joblib`-файлы "
+        "модели и TF-IDF-векторизатора, загрузить их и проверить совместимость по числу признаков."
+    )
+
+    if not model_paths or not vectorizer_paths:
+        _reset_saved_artifacts_state()
+        st.info(
+            "В каталогах `models/classifiers` и `models/vectorizers` пока нет полного набора "
+            "артефактов. Сначала обучите модель или добавьте сохраненные `.joblib`-файлы в проект."
+        )
+        return
+
+    model_options = {path.name: path for path in model_paths}
+    vectorizer_options = {path.name: path for path in vectorizer_paths}
+
+    selection_column_1, selection_column_2 = st.columns(2)
+    with selection_column_1:
+        selected_model_name = st.selectbox(
+            "Файл классификатора",
+            options=list(model_options.keys()),
+            key="saved_model_filename",
+        )
+    with selection_column_2:
+        selected_vectorizer_name = st.selectbox(
+            "Файл векторизатора",
+            options=list(vectorizer_options.keys()),
+            key="saved_vectorizer_filename",
+        )
+
+    current_selection_key = f"{selected_model_name}|{selected_vectorizer_name}"
+    if st.session_state.loaded_artifacts_selection_key != current_selection_key:
+        st.session_state.loaded_artifacts_result = None
+        st.session_state.loaded_artifacts_selection_key = current_selection_key
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- выбранная модель: `{model_options[selected_model_name]}`;",
+                f"- выбранный векторизатор: `{vectorizer_options[selected_vectorizer_name]}`;",
+            ]
+        )
+    )
+
+    if st.button(
+        "Загрузить модель и векторизатор из файлов",
+        use_container_width=True,
+    ):
+        try:
+            _reset_saved_artifacts_state()
+            st.session_state.loaded_artifacts_result = load_saved_artifacts(
+                model_options[selected_model_name],
+                vectorizer_options[selected_vectorizer_name],
+            )
+            st.session_state.loaded_artifacts_selection_key = current_selection_key
+        except SavedArtifactsLoadingError as error:
+            st.session_state.loaded_artifacts_result = None
+            st.session_state.loaded_artifacts_selection_key = current_selection_key
+            st.error(str(error))
+
+    loaded_artifacts_result = st.session_state.loaded_artifacts_result
+    if loaded_artifacts_result is None:
+        st.info(
+            "После загрузки здесь появятся сведения о типе артефактов, количестве классов, "
+            "размере словаря и пути к JSON-отчету о проверке."
+        )
+        return
+
+    _render_loaded_artifacts_preview(loaded_artifacts_result)
 
 
 def _render_evaluation_section(
@@ -962,6 +1097,7 @@ def render_main_page() -> None:
     )
 
     _render_dataset_loading_section()
+    _render_saved_artifacts_loading_section()
 
     st.subheader("Базовые директории проекта")
     st.code(
@@ -986,6 +1122,7 @@ def render_main_page() -> None:
                 f"Каталог отчетов по обучению: {PROJECT_PATHS.training_reports_dir}",
                 f"Каталог отчетов по метрикам: {PROJECT_PATHS.metrics_reports_dir}",
                 f"Каталог подробных отчетов: {PROJECT_PATHS.detailed_metrics_reports_dir}",
+                f"Каталог отчетов по загрузке артефактов: {PROJECT_PATHS.loading_reports_dir}",
             ]
         ),
         language="text",

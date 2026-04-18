@@ -26,7 +26,7 @@ class LogisticRegressionConfig:
     """Параметры обучения базового линейного классификатора."""
 
     max_iter: int = 1000
-    solver: str = "liblinear"
+    solver: str = "lbfgs"
     C: float = 1.0
     random_state: int = 42
 
@@ -113,6 +113,19 @@ def _validate_inputs(
         )
 
 
+def _validate_solver_for_class_count(
+    *,
+    solver_name: str,
+    class_count: int,
+) -> None:
+    """Проверяет, что выбранный solver совместим с числом классов задачи."""
+    if class_count > 2 and solver_name == "liblinear":
+        raise LogisticRegressionTrainingError(
+            "Solver `liblinear` не подходит для многоклассовой классификации в текущей "
+            "версии scikit-learn. Используйте, например, `lbfgs` или `saga`."
+        )
+
+
 def _build_model(config: LogisticRegressionConfig) -> LogisticRegression:
     """Создает объект Logistic Regression по заданной конфигурации."""
     return LogisticRegression(
@@ -180,6 +193,11 @@ def train_logistic_regression(
     """Обучает Logistic Regression на TF-IDF-признаках и сохраняет модель."""
     resolved_config = config or LogisticRegressionConfig()
     _validate_inputs(split_result, vectorization_result)
+    train_class_count = split_result.train_dataframe["label"].astype("string").nunique()
+    _validate_solver_for_class_count(
+        solver_name=resolved_config.solver,
+        class_count=int(train_class_count),
+    )
 
     train_labels = split_result.train_dataframe["label"].astype("string")
     model = _build_model(resolved_config)
