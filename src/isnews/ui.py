@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import pandas as pd
 
+from src.isnews.batch_text_inference import (
+    BatchTextInferenceError,
+    BatchTextInferenceResult,
+    predict_batch_news,
+)
 from src.isnews.config import PROJECT_PATHS
 from src.isnews.data_loading import DatasetLoadResult, DatasetValidationError
 from src.isnews.detailed_model_evaluation import (
@@ -385,6 +390,39 @@ def _render_single_inference_preview(
     st.dataframe(probabilities_table, use_container_width=True)
 
 
+def _render_batch_inference_preview(
+    batch_inference_result: BatchTextInferenceResult,
+) -> None:
+    """Показывает результат пакетной классификации CSV и предпросмотр таблицы."""
+    import streamlit as st
+
+    batch_report = batch_inference_result.report
+
+    st.success("CSV-файл успешно классифицирован пакетно.")
+
+    metric_column_1, metric_column_2, metric_column_3 = st.columns(3)
+    metric_column_1.metric("Всего строк", batch_report.total_rows)
+    metric_column_2.metric("Классифицировано", batch_report.predicted_rows)
+    metric_column_3.metric("Пропущено", batch_report.skipped_empty_rows)
+
+    for warning_message in batch_report.warning_messages:
+        st.warning(warning_message)
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- источник модели: `{batch_report.source_name}`;",
+                f"- колонка с текстом: `{batch_report.text_column}`;",
+                f"- CSV с предсказаниями: `{batch_inference_result.paths.predictions_path}`;",
+                f"- JSON-отчет: `{batch_inference_result.paths.report_path}`.",
+            ]
+        )
+    )
+
+    st.write("Первые 10 строк таблицы предсказаний:")
+    st.dataframe(batch_inference_result.dataframe.head(10), use_container_width=True)
+
+
 def _render_evaluation_preview(
     evaluation_result: ModelEvaluationResult,
 ) -> None:
@@ -567,6 +605,38 @@ def _reset_single_inference_state() -> None:
 
     st.session_state.single_inference_result = None
     st.session_state.single_inference_request_key = None
+
+
+def _reset_batch_inference_state() -> None:
+    """Сбрасывает состояние пакетного инференса при смене файла или источника модели."""
+    import streamlit as st
+
+    st.session_state.batch_inference_result = None
+    st.session_state.batch_inference_request_key = None
+
+
+def _get_available_inference_sources() -> dict[str, dict[str, object]]:
+    """Собирает доступные источники модели для одиночного и пакетного инференса."""
+    import streamlit as st
+
+    training_result = st.session_state.get("training_result")
+    vectorization_result = st.session_state.get("vectorization_result")
+    loaded_artifacts_result = st.session_state.get("loaded_artifacts_result")
+
+    available_sources: dict[str, dict[str, object]] = {}
+    if training_result is not None and vectorization_result is not None:
+        available_sources["Модель текущей сессии"] = {
+            "model": training_result.model,
+            "vectorizer": vectorization_result.vectorizer,
+            "source_name": f"session::{training_result.paths.model_path.name}",
+        }
+    if loaded_artifacts_result is not None:
+        available_sources["Загруженные артефакты"] = {
+            "model": loaded_artifacts_result.model,
+            "vectorizer": loaded_artifacts_result.vectorizer,
+            "source_name": f"loaded::{loaded_artifacts_result.paths.model_path.name}",
+        }
+    return available_sources
 
 
 def _reset_vectorization_state() -> None:
@@ -876,23 +946,7 @@ def _render_single_inference_section() -> None:
     if "single_inference_request_key" not in st.session_state:
         st.session_state.single_inference_request_key = None
 
-    training_result = st.session_state.get("training_result")
-    vectorization_result = st.session_state.get("vectorization_result")
-    loaded_artifacts_result = st.session_state.get("loaded_artifacts_result")
-
-    available_sources: dict[str, dict[str, object]] = {}
-    if training_result is not None and vectorization_result is not None:
-        available_sources["Модель текущей сессии"] = {
-            "model": training_result.model,
-            "vectorizer": vectorization_result.vectorizer,
-            "source_name": f"session::{training_result.paths.model_path.name}",
-        }
-    if loaded_artifacts_result is not None:
-        available_sources["Загруженные артефакты"] = {
-            "model": loaded_artifacts_result.model,
-            "vectorizer": loaded_artifacts_result.vectorizer,
-            "source_name": f"loaded::{loaded_artifacts_result.paths.model_path.name}",
-        }
+    available_sources = _get_available_inference_sources()
 
     st.subheader("Инференс одной новости")
     st.caption(
@@ -960,6 +1014,97 @@ def _render_single_inference_section() -> None:
         return
 
     _render_single_inference_preview(inference_result)
+
+
+def _render_batch_inference_section() -> None:
+    """Отрисовывает блок пакетной классификации новостей из CSV-файла."""
+    import streamlit as st
+
+    if "batch_inference_result" not in st.session_state:
+        st.session_state.batch_inference_result = None
+    if "batch_inference_request_key" not in st.session_state:
+        st.session_state.batch_inference_request_key = None
+
+    available_sources = _get_available_inference_sources()
+
+    st.subheader("Пакетный инференс CSV")
+    st.caption(
+        "На этом этапе можно загрузить CSV с новостями, автоматически найти колонку с "
+        "текстом и получить таблицу предсказанных классов и вероятностей по всем строкам."
+    )
+
+    if not available_sources:
+        _reset_batch_inference_state()
+        st.info(
+            "Для пакетного инференса пока нет доступной модели. Сначала обучите модель "
+            "в текущей сессии или загрузите сохраненные артефакты."
+        )
+        return
+
+    selected_source_label = st.radio(
+        "Источник модели для CSV",
+        options=list(available_sources.keys()),
+        horizontal=True,
+        key="batch_inference_source",
+    )
+    uploaded_file = st.file_uploader(
+        "CSV-файл для пакетной классификации",
+        type=["csv"],
+        help=(
+            "Поддерживаются колонки с текстом вроде `text`, `content`, `title`, "
+            "`description`, `текст`."
+        ),
+        key="batch_inference_file",
+    )
+
+    selected_source = available_sources[selected_source_label]
+    uploaded_file_key = None
+    if uploaded_file is not None:
+        uploaded_file_key = f"{uploaded_file.name}|{uploaded_file.size}"
+    current_request_key = f"{selected_source['source_name']}|{uploaded_file_key}"
+    if st.session_state.batch_inference_request_key != current_request_key:
+        st.session_state.batch_inference_result = None
+        st.session_state.batch_inference_request_key = current_request_key
+
+    st.markdown(
+        f"- выбранный источник: `{selected_source['source_name']}`;"
+    )
+
+    if st.button(
+        "Классифицировать CSV-файл",
+        use_container_width=True,
+    ):
+        if uploaded_file is None:
+            st.warning("Загрузите CSV-файл для пакетной классификации.")
+        else:
+            try:
+                uploaded_dataframe = pd.read_csv(uploaded_file)
+                _reset_batch_inference_state()
+                st.session_state.batch_inference_result = predict_batch_news(
+                    uploaded_dataframe,
+                    model=selected_source["model"],
+                    vectorizer=selected_source["vectorizer"],
+                    source_name=f"{selected_source['source_name']}::{uploaded_file.name}",
+                )
+                st.session_state.batch_inference_request_key = current_request_key
+            except (pd.errors.ParserError, UnicodeDecodeError) as error:
+                st.session_state.batch_inference_result = None
+                st.session_state.batch_inference_request_key = current_request_key
+                st.error(f"Не удалось прочитать CSV-файл: {error}")
+            except BatchTextInferenceError as error:
+                st.session_state.batch_inference_result = None
+                st.session_state.batch_inference_request_key = current_request_key
+                st.error(str(error))
+
+    batch_inference_result = st.session_state.batch_inference_result
+    if batch_inference_result is None:
+        st.info(
+            "После запуска пакетного инференса здесь появятся число обработанных строк, "
+            "пути к CSV и JSON-отчету, а также предпросмотр таблицы предсказаний."
+        )
+        return
+
+    _render_batch_inference_preview(batch_inference_result)
 
 
 def _render_evaluation_section(
@@ -1255,6 +1400,7 @@ def render_main_page() -> None:
     _render_dataset_loading_section()
     _render_saved_artifacts_loading_section()
     _render_single_inference_section()
+    _render_batch_inference_section()
 
     st.subheader("Базовые директории проекта")
     st.code(
