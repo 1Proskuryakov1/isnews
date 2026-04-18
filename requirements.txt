@@ -1,0 +1,21 @@
+# Базовые библиотеки для интерфейса и инфраструктуры проекта
+streamlit
+pandas
+numpy
+requests
+joblib
+
+# Библиотеки для классических моделей машинного обучения
+scikit-learn
+scipy
+
+# Библиотеки для нейросетевого обучения и инференса
+torch
+transformers
+datasets
+safetensors
+
+# Визуализация и оценка качества моделей
+matplotlib
+seaborn
+plotly
