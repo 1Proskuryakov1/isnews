@@ -38,6 +38,11 @@ from src.isnews.deployment_manifest import (
     DeploymentManifestResult,
     build_deployment_manifest,
 )
+from src.isnews.deployment_guide_export import (
+    DeploymentGuideExportError,
+    DeploymentGuideExportResult,
+    export_deployment_guide,
+)
 from src.isnews.experiment_registry import (
     ExperimentRegistryError,
     ExperimentRegistryResult,
@@ -927,6 +932,24 @@ def _render_deployment_manifest_preview(
 
     st.write("Список deployment-артефактов:")
     st.dataframe(artifacts_table, use_container_width=True)
+
+
+def _render_deployment_guide_preview(
+    deployment_guide_result: DeploymentGuideExportResult,
+) -> None:
+    """Показывает сведения о сформированной инструкции по развёртыванию."""
+    import streamlit as st
+
+    st.success("Инструкция по развёртыванию успешно сформирована.")
+    st.markdown(
+        "\n".join(
+            [
+                f"- Markdown-инструкция: `{deployment_guide_result.guide_path}`;",
+                f"- связанный JSON-манифест: `{deployment_guide_result.manifest_result.manifest_path}`;",
+                f"- target deployment: `{deployment_guide_result.manifest_result.report.deployment_target}`.",
+            ]
+        )
+    )
 
 
 def _render_confusion_heatmap_preview(
@@ -2634,6 +2657,50 @@ def _render_deployment_manifest_section() -> None:
     _render_deployment_manifest_preview(deployment_manifest_result)
 
 
+def _render_deployment_guide_section() -> None:
+    """Отрисовывает блок экспорта Markdown-инструкции по развёртыванию."""
+    import streamlit as st
+
+    if "deployment_guide_result" not in st.session_state:
+        st.session_state.deployment_guide_result = None
+
+    st.subheader("Инструкция по развёртыванию")
+    st.caption(
+        "На этом этапе можно сформировать человекочитаемую Markdown-инструкцию по deployment "
+        "на основе текущего состояния проекта и deployment-манифеста."
+    )
+    deployment_target = st.selectbox(
+        "Целевой сценарий инструкции",
+        options=[
+            "streamlit_local_or_cloud",
+            "streamlit_community_cloud",
+            "colab_demo_bundle",
+        ],
+        key="deployment_guide_target",
+    )
+
+    if st.button(
+        "Сформировать инструкцию по развёртыванию",
+        use_container_width=True,
+    ):
+        try:
+            st.session_state.deployment_guide_result = export_deployment_guide(
+                deployment_target=deployment_target
+            )
+        except DeploymentGuideExportError as error:
+            st.session_state.deployment_guide_result = None
+            st.error(str(error))
+
+    deployment_guide_result = st.session_state.deployment_guide_result
+    if deployment_guide_result is None:
+        st.info(
+            "После запуска здесь появится Markdown-файл с пошаговой инструкцией по развёртыванию сервиса."
+        )
+        return
+
+    _render_deployment_guide_preview(deployment_guide_result)
+
+
 def _render_evaluation_section(
     split_result: DatasetSplitResult,
     vectorization_result: TfidfVectorizationResult,
@@ -2938,6 +3005,7 @@ def render_main_page() -> None:
     _render_plot_export_section()
     _render_confusion_heatmap_section()
     _render_deployment_manifest_section()
+    _render_deployment_guide_section()
 
     st.subheader("Базовые директории проекта")
     st.code(
