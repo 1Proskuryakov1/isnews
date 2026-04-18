@@ -3,23 +3,42 @@
 from __future__ import annotations
 
 from src.isnews.config import PROJECT_PATHS
-from src.isnews.data_loading import DatasetLoadResult, load_dataset_from_uploaded_bytes
-from src.isnews.data_loading import load_dataset_from_url
+from src.isnews.data_loading import DatasetLoadResult, DatasetValidationError
+from src.isnews.data_loading import load_dataset_from_uploaded_bytes, load_dataset_from_url
 
 
 def _render_dataset_preview(dataset_result: DatasetLoadResult) -> None:
     """Показывает краткую сводку о загруженном датасете и первые строки таблицы."""
     import streamlit as st
 
+    validation_report = dataset_result.validation_report
+
     st.success(
         "Датасет успешно загружен и сохранен в проект: "
         f"`{dataset_result.saved_path}`"
     )
 
-    metric_column_1, metric_column_2, metric_column_3 = st.columns(3)
+    metric_column_1, metric_column_2, metric_column_3, metric_column_4 = st.columns(4)
     metric_column_1.metric("Строк", dataset_result.row_count)
     metric_column_2.metric("Столбцов", dataset_result.column_count)
-    metric_column_3.metric("Источник", dataset_result.source_name)
+    metric_column_3.metric("Годных строк", validation_report.usable_rows)
+    metric_column_4.metric("Строк с пропусками", validation_report.invalid_rows)
+
+    st.write("Результат проверки структуры датасета:")
+    st.markdown(
+        "\n".join(
+            [
+                f"- распознана колонка текста: `{validation_report.text_column}` -> `text`;",
+                f"- распознана колонка класса: `{validation_report.label_column}` -> `label`;",
+                f"- пустых значений в тексте: `{validation_report.empty_text_rows}`;",
+                f"- пустых значений в метках класса: `{validation_report.empty_label_rows}`;",
+                f"- исходный файл: `{dataset_result.source_name}`.",
+            ]
+        )
+    )
+
+    for warning_message in validation_report.warning_messages:
+        st.warning(warning_message)
 
     st.write("Названия колонок:")
     st.code(", ".join(str(column) for column in dataset_result.dataframe.columns))
@@ -36,6 +55,11 @@ def _render_dataset_loading_section() -> None:
         st.session_state.dataset_result = None
 
     st.subheader("Загрузка датасета")
+    st.caption(
+        "На текущем этапе датасет должен содержать колонку с текстом новости и "
+        "колонку с меткой класса. Поддерживаются алиасы вроде `text`, `content`, "
+        "`title`, `label`, `category`, `topic`, а также русскоязычные варианты."
+    )
     local_tab, url_tab = st.tabs(["Локальный CSV", "CSV по прямой ссылке"])
 
     with local_tab:
@@ -54,8 +78,9 @@ def _render_dataset_loading_section() -> None:
                     file_bytes=uploaded_file.getvalue(),
                     source_name=uploaded_file.name,
                 )
-            except Exception as error:
-                st.error(f"Не удалось загрузить локальный файл: {error}")
+            except DatasetValidationError as error:
+                st.session_state.dataset_result = None
+                st.error(str(error))
 
     with url_tab:
         dataset_url = st.text_input(
@@ -69,8 +94,9 @@ def _render_dataset_loading_section() -> None:
             else:
                 try:
                     st.session_state.dataset_result = load_dataset_from_url(dataset_url)
-                except Exception as error:
-                    st.error(f"Не удалось скачать датасет по ссылке: {error}")
+                except DatasetValidationError as error:
+                    st.session_state.dataset_result = None
+                    st.error(str(error))
 
     dataset_result = st.session_state.dataset_result
     if dataset_result is None:
