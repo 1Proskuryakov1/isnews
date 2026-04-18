@@ -14,6 +14,7 @@ class ProjectPaths:
     docs_dir: Path
     src_dir: Path
     data_dir: Path
+    raw_data_dir: Path
     models_dir: Path
     notebooks_dir: Path
     reports_dir: Path
@@ -27,10 +28,28 @@ class ProjectPaths:
             docs_dir=resolved_root / "docs",
             src_dir=resolved_root / "src",
             data_dir=resolved_root / "data",
+            raw_data_dir=resolved_root / "data" / "raw",
             models_dir=resolved_root / "models",
             notebooks_dir=resolved_root / "notebooks",
             reports_dir=resolved_root / "reports",
         )
+
+    @property
+    def managed_directories(self) -> tuple[Path, ...]:
+        """Возвращает список директорий, которые должны существовать в проекте."""
+        return (
+            self.docs_dir,
+            self.data_dir,
+            self.raw_data_dir,
+            self.models_dir,
+            self.notebooks_dir,
+            self.reports_dir,
+        )
+
+    def ensure_directories(self) -> None:
+        """Создает отсутствующие каталоги проекта перед сохранением артефактов."""
+        for directory in self.managed_directories:
+            directory.mkdir(parents=True, exist_ok=True)
 
 
 PROJECT_PATHS = ProjectPaths.from_root()
