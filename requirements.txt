@@ -1,22 +1,22 @@
 # Базовые библиотеки для интерфейса и инфраструктуры проекта
-streamlit
-pandas
-numpy
-requests
-joblib
-python-docx
+streamlit==1.56.0
+pandas==2.2.3
+numpy==2.2.5
+requests==2.32.3
+joblib==1.5.3
+python-docx==1.1.2
 
 # Библиотеки для классических моделей машинного обучения
-scikit-learn
-scipy
+scikit-learn==1.8.0
+scipy==1.17.0
 
-# Библиотеки для нейросетевого обучения и инференса
-torch
-transformers
-datasets
-safetensors
+# Библиотеки для нейросетевого обучения и Colab-экспериментов
+torch==2.11.0
+transformers==5.5.4
+datasets==4.8.4
+safetensors==0.7.0
 
 # Визуализация и оценка качества моделей
-matplotlib
-seaborn
-plotly
+matplotlib==3.10.3
+seaborn==0.13.2
+plotly==6.7.0
