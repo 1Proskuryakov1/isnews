@@ -82,6 +82,11 @@ from src.isnews.prediction_confidence_analysis import (
     PredictionConfidenceAnalysisResult,
     analyze_prediction_confidence,
 )
+from src.isnews.transformers_prediction_confidence_analysis import (
+    TransformersPredictionConfidenceAnalysisError,
+    TransformersPredictionConfidenceAnalysisResult,
+    analyze_transformers_prediction_confidence,
+)
 from src.isnews.plot_export import (
     PlotExportError,
     PlotExportResult,
@@ -116,6 +121,16 @@ from src.isnews.thesis_tables_export import (
     ThesisTablesExportError,
     ThesisTablesExportResult,
     export_thesis_tables,
+)
+from src.isnews.transformers_batch_error_analysis import (
+    TransformersBatchErrorAnalysisError,
+    TransformersBatchErrorAnalysisResult,
+    analyze_transformers_batch_errors,
+)
+from src.isnews.transformers_batch_inference_evaluation import (
+    TransformersBatchInferenceEvaluationError,
+    TransformersBatchInferenceEvaluationResult,
+    evaluate_transformers_batch_inference,
 )
 from src.isnews.text_preprocessing import TextPreprocessingError, TextPreprocessingResult
 from src.isnews.text_preprocessing import preprocess_dataset
@@ -558,7 +573,7 @@ def _render_batch_inference_preview(
 
 
 def _render_batch_inference_evaluation_preview(
-    evaluation_result: BatchInferenceEvaluationResult,
+    evaluation_result: BatchInferenceEvaluationResult | TransformersBatchInferenceEvaluationResult,
 ) -> None:
     """Показывает метрики и матрицу ошибок для размеченного пакетного инференса."""
     import streamlit as st
@@ -593,7 +608,7 @@ def _render_batch_inference_evaluation_preview(
 
 
 def _render_prediction_confidence_preview(
-    confidence_result: PredictionConfidenceAnalysisResult,
+    confidence_result: PredictionConfidenceAnalysisResult | TransformersPredictionConfidenceAnalysisResult,
 ) -> None:
     """Показывает top-N самых уверенных и самых неуверенных предсказаний модели."""
     import streamlit as st
@@ -632,7 +647,7 @@ def _render_prediction_confidence_preview(
 
 
 def _render_batch_error_analysis_preview(
-    error_analysis_result: BatchErrorAnalysisResult,
+    error_analysis_result: BatchErrorAnalysisResult | TransformersBatchErrorAnalysisResult,
 ) -> None:
     """Показывает таблицу неверно классифицированных строк."""
     import streamlit as st
@@ -1711,7 +1726,7 @@ def _render_batch_inference_section() -> None:
 
 
 def _render_prediction_confidence_section(
-    batch_inference_result: BatchTextInferenceResult,
+    batch_inference_result: BatchTextInferenceResult | TransformersBatchTextInferenceResult,
 ) -> None:
     """Отрисовывает блок анализа самых уверенных и неуверенных пакетных предсказаний."""
     import streamlit as st
@@ -1747,12 +1762,23 @@ def _render_prediction_confidence_section(
     ):
         try:
             _reset_prediction_confidence_state()
-            st.session_state.batch_confidence_analysis_result = analyze_prediction_confidence(
-                batch_inference_result,
-                top_n=int(top_n),
-            )
+            if isinstance(batch_inference_result, TransformersBatchTextInferenceResult):
+                st.session_state.batch_confidence_analysis_result = (
+                    analyze_transformers_prediction_confidence(
+                        batch_inference_result,
+                        top_n=int(top_n),
+                    )
+                )
+            else:
+                st.session_state.batch_confidence_analysis_result = analyze_prediction_confidence(
+                    batch_inference_result,
+                    top_n=int(top_n),
+                )
             st.session_state.batch_confidence_analysis_source_key = current_source_key
-        except PredictionConfidenceAnalysisError as error:
+        except (
+            PredictionConfidenceAnalysisError,
+            TransformersPredictionConfidenceAnalysisError,
+        ) as error:
             st.session_state.batch_confidence_analysis_result = None
             st.session_state.batch_confidence_analysis_source_key = current_source_key
             st.error(str(error))
@@ -1769,7 +1795,7 @@ def _render_prediction_confidence_section(
 
 
 def _render_batch_inference_evaluation_section(
-    batch_inference_result: BatchTextInferenceResult,
+    batch_inference_result: BatchTextInferenceResult | TransformersBatchTextInferenceResult,
 ) -> None:
     """Отрисовывает блок оценки пакетного инференса на размеченном CSV."""
     import streamlit as st
@@ -1796,11 +1822,19 @@ def _render_batch_inference_evaluation_section(
     ):
         try:
             _reset_batch_inference_evaluation_state()
-            st.session_state.batch_inference_evaluation_result = evaluate_batch_inference(
-                batch_inference_result
-            )
+            if isinstance(batch_inference_result, TransformersBatchTextInferenceResult):
+                st.session_state.batch_inference_evaluation_result = (
+                    evaluate_transformers_batch_inference(batch_inference_result)
+                )
+            else:
+                st.session_state.batch_inference_evaluation_result = evaluate_batch_inference(
+                    batch_inference_result
+                )
             st.session_state.batch_inference_evaluation_source_key = current_source_key
-        except BatchInferenceEvaluationError as error:
+        except (
+            BatchInferenceEvaluationError,
+            TransformersBatchInferenceEvaluationError,
+        ) as error:
             st.session_state.batch_inference_evaluation_result = None
             st.session_state.batch_inference_evaluation_source_key = current_source_key
             st.error(str(error))
@@ -1818,8 +1852,8 @@ def _render_batch_inference_evaluation_section(
 
 
 def _render_batch_error_analysis_section(
-    batch_inference_result: BatchTextInferenceResult,
-    evaluation_result: BatchInferenceEvaluationResult,
+    batch_inference_result: BatchTextInferenceResult | TransformersBatchTextInferenceResult,
+    evaluation_result: BatchInferenceEvaluationResult | TransformersBatchInferenceEvaluationResult,
 ) -> None:
     """Отрисовывает блок сохранения только неверно классифицированных строк."""
     import streamlit as st
@@ -1846,12 +1880,28 @@ def _render_batch_error_analysis_section(
     ):
         try:
             _reset_batch_error_analysis_state()
-            st.session_state.batch_error_analysis_result = analyze_batch_errors(
-                batch_inference_result,
-                evaluation_result.report,
-            )
+            if (
+                isinstance(batch_inference_result, TransformersBatchTextInferenceResult)
+                and isinstance(
+                    evaluation_result, TransformersBatchInferenceEvaluationResult
+                )
+            ):
+                st.session_state.batch_error_analysis_result = (
+                    analyze_transformers_batch_errors(
+                        batch_inference_result,
+                        evaluation_result.report,
+                    )
+                )
+            else:
+                st.session_state.batch_error_analysis_result = analyze_batch_errors(
+                    batch_inference_result,
+                    evaluation_result.report,
+                )
             st.session_state.batch_error_analysis_source_key = current_source_key
-        except BatchErrorAnalysisError as error:
+        except (
+            BatchErrorAnalysisError,
+            TransformersBatchErrorAnalysisError,
+        ) as error:
             st.session_state.batch_error_analysis_result = None
             st.session_state.batch_error_analysis_source_key = current_source_key
             st.error(str(error))
