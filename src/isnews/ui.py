@@ -6,6 +6,11 @@ import pandas as pd
 
 from src.isnews.config import PROJECT_PATHS
 from src.isnews.data_loading import DatasetLoadResult, DatasetValidationError
+from src.isnews.detailed_model_evaluation import (
+    DetailedModelEvaluationError,
+    DetailedModelEvaluationResult,
+    evaluate_model_in_detail,
+)
 from src.isnews.data_loading import load_dataset_from_uploaded_bytes, load_dataset_from_url
 from src.isnews.dataset_split import DatasetSplitError, DatasetSplitResult, split_dataset
 from src.isnews.logistic_regression_training import (
@@ -352,12 +357,95 @@ def _render_evaluation_preview(
     st.dataframe(metrics_table, use_container_width=True)
 
 
+def _render_detailed_evaluation_preview(
+    detailed_evaluation_result: DetailedModelEvaluationResult,
+) -> None:
+    """Показывает поклассовые метрики и матрицы ошибок для validation и test."""
+    import streamlit as st
+
+    validation_metrics_table = pd.DataFrame(
+        [
+            {
+                "Класс": metrics.label,
+                "Precision": metrics.precision,
+                "Recall": metrics.recall,
+                "F1-score": metrics.f1_score,
+                "Support": metrics.support,
+            }
+            for metrics in detailed_evaluation_result.report.validation.per_class_metrics
+        ]
+    )
+    test_metrics_table = pd.DataFrame(
+        [
+            {
+                "Класс": metrics.label,
+                "Precision": metrics.precision,
+                "Recall": metrics.recall,
+                "F1-score": metrics.f1_score,
+                "Support": metrics.support,
+            }
+            for metrics in detailed_evaluation_result.report.test.per_class_metrics
+        ]
+    )
+    validation_confusion_matrix = pd.DataFrame(
+        detailed_evaluation_result.report.validation.confusion_matrix,
+        index=detailed_evaluation_result.report.validation.class_labels,
+        columns=detailed_evaluation_result.report.validation.class_labels,
+    )
+    test_confusion_matrix = pd.DataFrame(
+        detailed_evaluation_result.report.test.confusion_matrix,
+        index=detailed_evaluation_result.report.test.class_labels,
+        columns=detailed_evaluation_result.report.test.class_labels,
+    )
+
+    st.success("Подробный отчет по классам и матрицы ошибок сохранены.")
+
+    for warning_message in detailed_evaluation_result.report.validation.warning_messages:
+        st.warning(warning_message)
+    for warning_message in detailed_evaluation_result.report.test.warning_messages:
+        st.warning(warning_message)
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- JSON-отчет: `{detailed_evaluation_result.paths.report_path}`;",
+                f"- CSV матрицы ошибок validation: "
+                f"`{detailed_evaluation_result.paths.validation_confusion_matrix_path}`;",
+                f"- CSV матрицы ошибок test: "
+                f"`{detailed_evaluation_result.paths.test_confusion_matrix_path}`.",
+            ]
+        )
+    )
+
+    validation_column, test_column = st.columns(2)
+    with validation_column:
+        st.write("Поклассовые метрики validation:")
+        st.dataframe(validation_metrics_table, use_container_width=True)
+        st.write("Матрица ошибок validation:")
+        st.dataframe(validation_confusion_matrix, use_container_width=True)
+
+    with test_column:
+        st.write("Поклассовые метрики test:")
+        st.dataframe(test_metrics_table, use_container_width=True)
+        st.write("Матрица ошибок test:")
+        st.dataframe(test_confusion_matrix, use_container_width=True)
+
+
+def _reset_detailed_evaluation_state() -> None:
+    """Сбрасывает состояние подробного отчета при смене базовой оценки."""
+    import streamlit as st
+
+    st.session_state.detailed_evaluation_result = None
+    st.session_state.detailed_evaluation_source_key = None
+
+
 def _reset_evaluation_state() -> None:
     """Сбрасывает результат оценки качества при смене модели."""
     import streamlit as st
 
     st.session_state.evaluation_result = None
     st.session_state.evaluation_source_key = None
+    _reset_detailed_evaluation_state()
 
 
 def _reset_training_state() -> None:
@@ -634,6 +722,58 @@ def _render_evaluation_section(
     _render_evaluation_preview(evaluation_result)
 
 
+def _render_detailed_evaluation_section(
+    split_result: DatasetSplitResult,
+    vectorization_result: TfidfVectorizationResult,
+    training_result: LogisticRegressionTrainingResult,
+    evaluation_result: ModelEvaluationResult,
+) -> None:
+    """Отрисовывает блок поклассового отчета и матриц ошибок."""
+    import streamlit as st
+
+    current_source_key = str(evaluation_result.paths.report_path)
+    if "detailed_evaluation_result" not in st.session_state:
+        st.session_state.detailed_evaluation_result = None
+    if "detailed_evaluation_source_key" not in st.session_state:
+        st.session_state.detailed_evaluation_source_key = None
+
+    if st.session_state.detailed_evaluation_source_key != current_source_key:
+        st.session_state.detailed_evaluation_result = None
+        st.session_state.detailed_evaluation_source_key = current_source_key
+
+    st.subheader("Подробный отчет по классам")
+    st.caption(
+        "На этом этапе строятся поклассовые `Precision`, `Recall`, `F1-score` "
+        "и матрицы ошибок для `validation` и `test`."
+    )
+
+    if st.button(
+        "Сформировать подробный отчет и матрицы ошибок",
+        use_container_width=True,
+    ):
+        try:
+            _reset_detailed_evaluation_state()
+            st.session_state.detailed_evaluation_result = evaluate_model_in_detail(
+                split_result,
+                vectorization_result,
+                training_result,
+            )
+            st.session_state.detailed_evaluation_source_key = current_source_key
+        except DetailedModelEvaluationError as error:
+            st.session_state.detailed_evaluation_result = None
+            st.error(str(error))
+
+    detailed_evaluation_result = st.session_state.detailed_evaluation_result
+    if detailed_evaluation_result is None:
+        st.info(
+            "После запуска этого этапа здесь появятся поклассовые таблицы и "
+            "матрицы ошибок для validation и test."
+        )
+        return
+
+    _render_detailed_evaluation_preview(detailed_evaluation_result)
+
+
 def _render_dataset_preview(dataset_result: DatasetLoadResult) -> None:
     """Показывает краткую сводку о загруженном датасете и первые строки таблицы."""
     import streamlit as st
@@ -770,6 +910,19 @@ def _render_dataset_loading_section() -> None:
             vectorization_result,
             training_result,
         )
+    evaluation_result = st.session_state.get("evaluation_result")
+    if (
+        split_result is not None
+        and vectorization_result is not None
+        and training_result is not None
+        and evaluation_result is not None
+    ):
+        _render_detailed_evaluation_section(
+            split_result,
+            vectorization_result,
+            training_result,
+            evaluation_result,
+        )
 
 
 def render_main_page() -> None:
@@ -832,6 +985,7 @@ def render_main_page() -> None:
                 f"Каталог отчетов по векторизации: {PROJECT_PATHS.vectorization_reports_dir}",
                 f"Каталог отчетов по обучению: {PROJECT_PATHS.training_reports_dir}",
                 f"Каталог отчетов по метрикам: {PROJECT_PATHS.metrics_reports_dir}",
+                f"Каталог подробных отчетов: {PROJECT_PATHS.detailed_metrics_reports_dir}",
             ]
         ),
         language="text",
