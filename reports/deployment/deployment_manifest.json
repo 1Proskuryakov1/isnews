@@ -1,0 +1,52 @@
+{
+  "report": {
+    "generated_at": "2026-04-18T21:41:12+03:00",
+    "deployment_target": "streamlit_local_or_cloud",
+    "required_artifacts_ready": true,
+    "detected_model_count": 0,
+    "detected_vectorizer_count": 0,
+    "detected_transformers_model_count": 0,
+    "missing_artifacts": [],
+    "notes": [
+      "В репозитории пока не найдено сохранённых моделей для демонстрации после развёртывания.",
+      "Базовые файлы запуска присутствуют: main.py, requirements.txt и пакет src/isnews."
+    ]
+  },
+  "artifacts": [
+    {
+      "artifact_name": "main_entrypoint",
+      "relative_path": "main.py",
+      "exists": true,
+      "artifact_type": "file"
+    },
+    {
+      "artifact_name": "requirements",
+      "relative_path": "requirements.txt",
+      "exists": true,
+      "artifact_type": "file"
+    },
+    {
+      "artifact_name": "source_package",
+      "relative_path": "src/isnews",
+      "exists": true,
+      "artifact_type": "directory"
+    },
+    {
+      "artifact_name": "models_directory",
+      "relative_path": "models",
+      "exists": true,
+      "artifact_type": "directory"
+    },
+    {
+      "artifact_name": "reports_directory",
+      "relative_path": "reports",
+      "exists": true,
+      "artifact_type": "directory"
+    }
+  ],
+  "detected_paths": {
+    "classifier_files": [],
+    "vectorizer_files": [],
+    "transformers_directories": []
+  }
+}
