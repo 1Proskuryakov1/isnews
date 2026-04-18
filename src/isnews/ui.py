@@ -43,6 +43,10 @@ from src.isnews.html_report_export import (
     HtmlReportExportResult,
     export_session_html_report,
 )
+from src.isnews.inference_source_registry import (
+    InferenceSourceDescriptor,
+    collect_inference_sources,
+)
 from src.isnews.docx_report_export import (
     DocxReportExportError,
     DocxReportExportResult,
@@ -97,6 +101,16 @@ from src.isnews.single_text_inference import (
     SingleTextInferenceError,
     SingleTextInferenceResult,
     predict_single_news,
+)
+from src.isnews.transformers_single_text_inference import (
+    TransformersSingleTextInferenceError,
+    TransformersSingleTextInferenceResult,
+    predict_single_news_with_transformers,
+)
+from src.isnews.transformers_batch_text_inference import (
+    TransformersBatchTextInferenceError,
+    TransformersBatchTextInferenceResult,
+    predict_batch_news_with_transformers,
 )
 from src.isnews.thesis_tables_export import (
     ThesisTablesExportError,
@@ -459,7 +473,7 @@ def _render_loaded_transformers_artifacts_preview(
 
 
 def _render_single_inference_preview(
-    inference_result: SingleTextInferenceResult,
+    inference_result: SingleTextInferenceResult | TransformersSingleTextInferenceResult,
 ) -> None:
     """Показывает результат классификации одной новости и вероятности по классам."""
     import streamlit as st
@@ -493,7 +507,7 @@ def _render_single_inference_preview(
             [
                 f"- источник модели: `{inference_report.source_name}`;",
                 f"- тип модели: `{inference_report.model_type}`;",
-                f"- тип векторизатора: `{inference_report.vectorizer_type}`;",
+                f"- тип признакового преобразования: `{getattr(inference_report, 'vectorizer_type', getattr(inference_report, 'tokenizer_type', 'нет данных'))}`;",
                 f"- JSON-отчет по инференсу: `{inference_result.paths.report_path}`.",
             ]
         )
@@ -502,12 +516,16 @@ def _render_single_inference_preview(
     st.write("Очищенный текст, поданный в модель:")
     st.code(inference_result.cleaned_text, language="text")
 
+    token_count = getattr(inference_report, "token_count", None)
+    if token_count is not None:
+        st.markdown(f"- число токенов после токенизации: `{token_count}`;")
+
     st.write("Вероятности по классам:")
     st.dataframe(probabilities_table, use_container_width=True)
 
 
 def _render_batch_inference_preview(
-    batch_inference_result: BatchTextInferenceResult,
+    batch_inference_result: BatchTextInferenceResult | TransformersBatchTextInferenceResult,
 ) -> None:
     """Показывает результат пакетной классификации CSV и предпросмотр таблицы."""
     import streamlit as st
@@ -1059,33 +1077,18 @@ def _reset_batch_error_analysis_state() -> None:
     st.session_state.batch_error_analysis_source_key = None
 
 
-def _get_available_inference_sources() -> dict[str, dict[str, object]]:
+def _get_available_inference_sources() -> dict[str, InferenceSourceDescriptor]:
     """Собирает доступные источники модели для одиночного и пакетного инференса."""
     import streamlit as st
 
-    training_result = st.session_state.get("training_result")
-    vectorization_result = st.session_state.get("vectorization_result")
-    loaded_artifacts_result = st.session_state.get("loaded_artifacts_result")
-
-    available_sources: dict[str, dict[str, object]] = {}
-    if (
-        training_result is not None
-        and vectorization_result is not None
-        and hasattr(training_result.model, "predict_proba")
-        and hasattr(training_result.model, "classes_")
-    ):
-        available_sources["Модель текущей сессии"] = {
-            "model": training_result.model,
-            "vectorizer": vectorization_result.vectorizer,
-            "source_name": f"session::{training_result.paths.model_path.name}",
-        }
-    if loaded_artifacts_result is not None:
-        available_sources["Загруженные артефакты"] = {
-            "model": loaded_artifacts_result.model,
-            "vectorizer": loaded_artifacts_result.vectorizer,
-            "source_name": f"loaded::{loaded_artifacts_result.paths.model_path.name}",
-        }
-    return available_sources
+    return collect_inference_sources(
+        training_result=st.session_state.get("training_result"),
+        vectorization_result=st.session_state.get("vectorization_result"),
+        loaded_artifacts_result=st.session_state.get("loaded_artifacts_result"),
+        loaded_transformers_result=st.session_state.get(
+            "loaded_transformers_artifacts_result"
+        ),
+    )
 
 
 def _reset_vectorization_state() -> None:
@@ -1557,14 +1560,12 @@ def _render_single_inference_section() -> None:
     )
 
     selected_source = available_sources[selected_source_label]
-    current_request_key = f"{selected_source['source_name']}|{news_text}"
+    current_request_key = f"{selected_source.source_name}|{news_text}"
     if st.session_state.single_inference_request_key != current_request_key:
         st.session_state.single_inference_result = None
         st.session_state.single_inference_request_key = current_request_key
 
-    st.markdown(
-        f"- выбранный источник: `{selected_source['source_name']}`;"
-    )
+    st.markdown(f"- выбранный источник: `{selected_source.source_name}`;")
 
     if st.button(
         "Классифицировать новость",
@@ -1572,14 +1573,24 @@ def _render_single_inference_section() -> None:
     ):
         try:
             _reset_single_inference_state()
-            st.session_state.single_inference_result = predict_single_news(
-                news_text,
-                model=selected_source["model"],
-                vectorizer=selected_source["vectorizer"],
-                source_name=str(selected_source["source_name"]),
-            )
+            if selected_source.source_kind == "transformers":
+                st.session_state.single_inference_result = (
+                    predict_single_news_with_transformers(
+                        news_text,
+                        model=selected_source.model,
+                        tokenizer=selected_source.tokenizer,
+                        source_name=selected_source.source_name,
+                    )
+                )
+            else:
+                st.session_state.single_inference_result = predict_single_news(
+                    news_text,
+                    model=selected_source.model,
+                    vectorizer=selected_source.vectorizer,
+                    source_name=selected_source.source_name,
+                )
             st.session_state.single_inference_request_key = current_request_key
-        except SingleTextInferenceError as error:
+        except (SingleTextInferenceError, TransformersSingleTextInferenceError) as error:
             st.session_state.single_inference_result = None
             st.session_state.single_inference_request_key = current_request_key
             st.error(str(error))
@@ -1640,14 +1651,12 @@ def _render_batch_inference_section() -> None:
     uploaded_file_key = None
     if uploaded_file is not None:
         uploaded_file_key = f"{uploaded_file.name}|{uploaded_file.size}"
-    current_request_key = f"{selected_source['source_name']}|{uploaded_file_key}"
+    current_request_key = f"{selected_source.source_name}|{uploaded_file_key}"
     if st.session_state.batch_inference_request_key != current_request_key:
         st.session_state.batch_inference_result = None
         st.session_state.batch_inference_request_key = current_request_key
 
-    st.markdown(
-        f"- выбранный источник: `{selected_source['source_name']}`;"
-    )
+    st.markdown(f"- выбранный источник: `{selected_source.source_name}`;")
 
     if st.button(
         "Классифицировать CSV-файл",
@@ -1659,18 +1668,31 @@ def _render_batch_inference_section() -> None:
             try:
                 uploaded_dataframe = pd.read_csv(uploaded_file)
                 _reset_batch_inference_state()
-                st.session_state.batch_inference_result = predict_batch_news(
-                    uploaded_dataframe,
-                    model=selected_source["model"],
-                    vectorizer=selected_source["vectorizer"],
-                    source_name=f"{selected_source['source_name']}::{uploaded_file.name}",
-                )
+                if selected_source.source_kind == "transformers":
+                    st.session_state.batch_inference_result = (
+                        predict_batch_news_with_transformers(
+                            uploaded_dataframe,
+                            model=selected_source.model,
+                            tokenizer=selected_source.tokenizer,
+                            source_name=f"{selected_source.source_name}::{uploaded_file.name}",
+                        )
+                    )
+                else:
+                    st.session_state.batch_inference_result = predict_batch_news(
+                        uploaded_dataframe,
+                        model=selected_source.model,
+                        vectorizer=selected_source.vectorizer,
+                        source_name=f"{selected_source.source_name}::{uploaded_file.name}",
+                    )
                 st.session_state.batch_inference_request_key = current_request_key
             except (pd.errors.ParserError, UnicodeDecodeError) as error:
                 st.session_state.batch_inference_result = None
                 st.session_state.batch_inference_request_key = current_request_key
                 st.error(f"Не удалось прочитать CSV-файл: {error}")
-            except BatchTextInferenceError as error:
+            except (
+                BatchTextInferenceError,
+                TransformersBatchTextInferenceError,
+            ) as error:
                 st.session_state.batch_inference_result = None
                 st.session_state.batch_inference_request_key = current_request_key
                 st.error(str(error))
