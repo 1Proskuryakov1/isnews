@@ -43,6 +43,11 @@ from src.isnews.model_evaluation import (
     ModelEvaluationResult,
     evaluate_trained_model,
 )
+from src.isnews.model_comparison import (
+    ModelComparisonError,
+    ModelComparisonResult,
+    compare_trained_models,
+)
 from src.isnews.saved_artifacts_loading import (
     SavedArtifactsLoadingError,
     SavedArtifactsLoadingResult,
@@ -519,6 +524,46 @@ def _render_experiment_registry_preview(
 
     st.write("Первые 20 записей реестра:")
     st.dataframe(registry_dataframe.head(20), use_container_width=True)
+
+
+def _render_model_comparison_preview(
+    comparison_result: ModelComparisonResult,
+) -> None:
+    """Показывает сводную таблицу сравнения обученных моделей."""
+    import streamlit as st
+
+    comparison_dataframe = comparison_result.dataframe
+
+    st.success("Сравнение обученных моделей успешно сформировано.")
+
+    metric_column_1, metric_column_2, metric_column_3 = st.columns(3)
+    metric_column_1.metric("Моделей в таблице", len(comparison_dataframe))
+    metric_column_2.metric(
+        "Лучшая модель",
+        comparison_result.best_model_name or "нет данных",
+    )
+    metric_column_3.metric(
+        "Лучший Validation Accuracy",
+        comparison_dataframe.iloc[0]["validation_accuracy"] if not comparison_dataframe.empty else "нет данных",
+    )
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- CSV-сравнение: `{comparison_result.paths.csv_path}`;",
+                f"- JSON-сравнение: `{comparison_result.paths.json_path}`.",
+            ]
+        )
+    )
+
+    if comparison_dataframe.empty:
+        st.info(
+            "Пока не найдено сохраненных обучающих запусков. После обучения моделей здесь появится таблица сравнения."
+        )
+        return
+
+    st.write("Сравнение моделей по основным метрикам:")
+    st.dataframe(comparison_dataframe, use_container_width=True)
 
 
 def _render_evaluation_preview(
@@ -1314,6 +1359,39 @@ def _render_experiment_registry_section() -> None:
     _render_experiment_registry_preview(registry_result)
 
 
+def _render_model_comparison_section() -> None:
+    """Отрисовывает блок сравнения нескольких обученных моделей."""
+    import streamlit as st
+
+    if "model_comparison_result" not in st.session_state:
+        st.session_state.model_comparison_result = None
+
+    st.subheader("Сравнение моделей")
+    st.caption(
+        "На этом этапе можно построить единую таблицу сравнения по всем найденным обученным "
+        "моделям и выбрать лучший запуск по `validation accuracy`."
+    )
+
+    if st.button(
+        "Сформировать таблицу сравнения моделей",
+        use_container_width=True,
+    ):
+        try:
+            st.session_state.model_comparison_result = compare_trained_models()
+        except ModelComparisonError as error:
+            st.session_state.model_comparison_result = None
+            st.error(str(error))
+
+    comparison_result = st.session_state.model_comparison_result
+    if comparison_result is None:
+        st.info(
+            "После запуска здесь появится таблица сравнения всех обученных моделей и пути к CSV/JSON-сводке."
+        )
+        return
+
+    _render_model_comparison_preview(comparison_result)
+
+
 def _render_evaluation_section(
     split_result: DatasetSplitResult,
     vectorization_result: TfidfVectorizationResult,
@@ -1609,6 +1687,7 @@ def render_main_page() -> None:
     _render_single_inference_section()
     _render_batch_inference_section()
     _render_experiment_registry_section()
+    _render_model_comparison_section()
 
     st.subheader("Базовые директории проекта")
     st.code(
@@ -1636,6 +1715,7 @@ def render_main_page() -> None:
                 f"Каталог отчетов по загрузке артефактов: {PROJECT_PATHS.loading_reports_dir}",
                 f"Каталог отчетов по инференсу: {PROJECT_PATHS.inference_reports_dir}",
                 f"Каталог сводных реестров экспериментов: {PROJECT_PATHS.experiment_reports_dir}",
+                f"Каталог сравнений моделей: {PROJECT_PATHS.comparison_reports_dir}",
             ]
         ),
         language="text",
