@@ -13,6 +13,11 @@ from src.isnews.logistic_regression_training import (
     LogisticRegressionTrainingResult,
     train_logistic_regression,
 )
+from src.isnews.model_evaluation import (
+    ModelEvaluationError,
+    ModelEvaluationResult,
+    evaluate_trained_model,
+)
 from src.isnews.text_preprocessing import TextPreprocessingError, TextPreprocessingResult
 from src.isnews.text_preprocessing import preprocess_dataset
 from src.isnews.tfidf_vectorization import (
@@ -279,12 +284,89 @@ def _render_training_preview(
     )
 
 
+def _render_evaluation_preview(
+    evaluation_result: ModelEvaluationResult,
+) -> None:
+    """Показывает итоговые метрики качества для train, validation и test."""
+    import streamlit as st
+
+    evaluation_report = evaluation_result.report
+    metrics_table = pd.DataFrame(
+        [
+            {
+                "Выборка": "train",
+                "Accuracy": evaluation_report.train_metrics.accuracy,
+                "Precision macro": evaluation_report.train_metrics.precision_macro,
+                "Recall macro": evaluation_report.train_metrics.recall_macro,
+                "F1 macro": evaluation_report.train_metrics.f1_macro,
+                "Support": evaluation_report.train_metrics.support,
+            },
+            {
+                "Выборка": "validation",
+                "Accuracy": evaluation_report.validation_metrics.accuracy,
+                "Precision macro": evaluation_report.validation_metrics.precision_macro,
+                "Recall macro": evaluation_report.validation_metrics.recall_macro,
+                "F1 macro": evaluation_report.validation_metrics.f1_macro,
+                "Support": evaluation_report.validation_metrics.support,
+            },
+            {
+                "Выборка": "test",
+                "Accuracy": evaluation_report.test_metrics.accuracy,
+                "Precision macro": evaluation_report.test_metrics.precision_macro,
+                "Recall macro": evaluation_report.test_metrics.recall_macro,
+                "F1 macro": evaluation_report.test_metrics.f1_macro,
+                "Support": evaluation_report.test_metrics.support,
+            },
+        ]
+    )
+
+    st.success("Метрики качества модели рассчитаны и сохранены.")
+
+    metric_column_1, metric_column_2, metric_column_3 = st.columns(3)
+    metric_column_1.metric(
+        "Validation Accuracy",
+        evaluation_report.validation_metrics.accuracy,
+    )
+    metric_column_2.metric(
+        "Test Accuracy",
+        evaluation_report.test_metrics.accuracy,
+    )
+    metric_column_3.metric(
+        "Validation F1",
+        evaluation_report.validation_metrics.f1_macro,
+    )
+
+    for warning_message in evaluation_report.warning_messages:
+        st.warning(warning_message)
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- классы модели: `{', '.join(evaluation_report.class_labels)}`;",
+                f"- JSON-отчет по метрикам: `{evaluation_result.paths.report_path}`.",
+            ]
+        )
+    )
+
+    st.write("Сводка метрик:")
+    st.dataframe(metrics_table, use_container_width=True)
+
+
+def _reset_evaluation_state() -> None:
+    """Сбрасывает результат оценки качества при смене модели."""
+    import streamlit as st
+
+    st.session_state.evaluation_result = None
+    st.session_state.evaluation_source_key = None
+
+
 def _reset_training_state() -> None:
     """Сбрасывает состояние обучения при смене признаков или сплита."""
     import streamlit as st
 
     st.session_state.training_result = None
     st.session_state.training_source_key = None
+    _reset_evaluation_state()
 
 
 def _reset_vectorization_state() -> None:
@@ -501,6 +583,57 @@ def _render_training_section(
     _render_training_preview(training_result)
 
 
+def _render_evaluation_section(
+    split_result: DatasetSplitResult,
+    vectorization_result: TfidfVectorizationResult,
+    training_result: LogisticRegressionTrainingResult,
+) -> None:
+    """Отрисовывает блок расчета метрик качества для обученной модели."""
+    import streamlit as st
+
+    current_source_key = str(training_result.paths.model_path)
+    if "evaluation_result" not in st.session_state:
+        st.session_state.evaluation_result = None
+    if "evaluation_source_key" not in st.session_state:
+        st.session_state.evaluation_source_key = None
+
+    if st.session_state.evaluation_source_key != current_source_key:
+        st.session_state.evaluation_result = None
+        st.session_state.evaluation_source_key = current_source_key
+
+    st.subheader("Оценка качества")
+    st.caption(
+        "На этом этапе рассчитываются `Accuracy`, `Precision`, `Recall` и `F1-score` "
+        "для `train`, `validation` и `test`."
+    )
+
+    if st.button(
+        "Рассчитать метрики качества модели",
+        use_container_width=True,
+    ):
+        try:
+            _reset_evaluation_state()
+            st.session_state.evaluation_result = evaluate_trained_model(
+                split_result,
+                vectorization_result,
+                training_result,
+            )
+            st.session_state.evaluation_source_key = current_source_key
+        except ModelEvaluationError as error:
+            st.session_state.evaluation_result = None
+            st.error(str(error))
+
+    evaluation_result = st.session_state.evaluation_result
+    if evaluation_result is None:
+        st.info(
+            "После расчета метрик здесь появятся показатели качества на train, "
+            "validation и test, а также путь к JSON-отчету."
+        )
+        return
+
+    _render_evaluation_preview(evaluation_result)
+
+
 def _render_dataset_preview(dataset_result: DatasetLoadResult) -> None:
     """Показывает краткую сводку о загруженном датасете и первые строки таблицы."""
     import streamlit as st
@@ -626,6 +759,17 @@ def _render_dataset_loading_section() -> None:
     vectorization_result = st.session_state.get("vectorization_result")
     if split_result is not None and vectorization_result is not None:
         _render_training_section(split_result, vectorization_result)
+    training_result = st.session_state.get("training_result")
+    if (
+        split_result is not None
+        and vectorization_result is not None
+        and training_result is not None
+    ):
+        _render_evaluation_section(
+            split_result,
+            vectorization_result,
+            training_result,
+        )
 
 
 def render_main_page() -> None:
@@ -687,6 +831,7 @@ def render_main_page() -> None:
                 f"Каталог отчетов по сплитам: {PROJECT_PATHS.split_reports_dir}",
                 f"Каталог отчетов по векторизации: {PROJECT_PATHS.vectorization_reports_dir}",
                 f"Каталог отчетов по обучению: {PROJECT_PATHS.training_reports_dir}",
+                f"Каталог отчетов по метрикам: {PROJECT_PATHS.metrics_reports_dir}",
             ]
         ),
         language="text",

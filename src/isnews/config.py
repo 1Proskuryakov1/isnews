@@ -28,6 +28,7 @@ class ProjectPaths:
     split_reports_dir: Path
     vectorization_reports_dir: Path
     training_reports_dir: Path
+    metrics_reports_dir: Path
 
     @classmethod
     def from_root(cls, root: Path | None = None) -> "ProjectPaths":
@@ -52,6 +53,7 @@ class ProjectPaths:
             split_reports_dir=resolved_root / "reports" / "splits",
             vectorization_reports_dir=resolved_root / "reports" / "vectorization",
             training_reports_dir=resolved_root / "reports" / "training",
+            metrics_reports_dir=resolved_root / "reports" / "metrics",
         )
 
     @property
@@ -74,6 +76,7 @@ class ProjectPaths:
             self.split_reports_dir,
             self.vectorization_reports_dir,
             self.training_reports_dir,
+            self.metrics_reports_dir,
         )
 
     def ensure_directories(self) -> None:
