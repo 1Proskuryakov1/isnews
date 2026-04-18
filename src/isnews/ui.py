@@ -9,6 +9,11 @@ from src.isnews.batch_text_inference import (
     BatchTextInferenceResult,
     predict_batch_news,
 )
+from src.isnews.batch_inference_evaluation import (
+    BatchInferenceEvaluationError,
+    BatchInferenceEvaluationResult,
+    evaluate_batch_inference,
+)
 from src.isnews.config import PROJECT_PATHS
 from src.isnews.data_loading import DatasetLoadResult, DatasetValidationError
 from src.isnews.detailed_model_evaluation import (
@@ -423,6 +428,41 @@ def _render_batch_inference_preview(
     st.dataframe(batch_inference_result.dataframe.head(10), use_container_width=True)
 
 
+def _render_batch_inference_evaluation_preview(
+    evaluation_result: BatchInferenceEvaluationResult,
+) -> None:
+    """Показывает метрики и матрицу ошибок для размеченного пакетного инференса."""
+    import streamlit as st
+
+    evaluation_report = evaluation_result.report
+
+    st.success("Качество пакетного инференса на размеченном CSV рассчитано.")
+
+    metric_column_1, metric_column_2, metric_column_3, metric_column_4 = st.columns(4)
+    metric_column_1.metric("Accuracy", evaluation_report.accuracy)
+    metric_column_2.metric("Precision macro", evaluation_report.precision_macro)
+    metric_column_3.metric("Recall macro", evaluation_report.recall_macro)
+    metric_column_4.metric("F1 macro", evaluation_report.f1_macro)
+
+    for warning_message in evaluation_report.warning_messages:
+        st.warning(warning_message)
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- колонка истинного класса: `{evaluation_report.label_column}`;",
+                f"- оценено строк: `{evaluation_report.evaluated_rows}`;",
+                f"- пропущено строк: `{evaluation_report.skipped_rows_without_label}`;",
+                f"- JSON-отчет: `{evaluation_result.paths.report_path}`;",
+                f"- CSV матрицы ошибок: `{evaluation_result.paths.confusion_matrix_path}`.",
+            ]
+        )
+    )
+
+    st.write("Матрица ошибок:")
+    st.dataframe(evaluation_result.confusion_matrix_dataframe, use_container_width=True)
+
+
 def _render_evaluation_preview(
     evaluation_result: ModelEvaluationResult,
 ) -> None:
@@ -613,6 +653,15 @@ def _reset_batch_inference_state() -> None:
 
     st.session_state.batch_inference_result = None
     st.session_state.batch_inference_request_key = None
+    _reset_batch_inference_evaluation_state()
+
+
+def _reset_batch_inference_evaluation_state() -> None:
+    """Сбрасывает состояние оценки пакетного инференса при смене CSV с предсказаниями."""
+    import streamlit as st
+
+    st.session_state.batch_inference_evaluation_result = None
+    st.session_state.batch_inference_evaluation_source_key = None
 
 
 def _get_available_inference_sources() -> dict[str, dict[str, object]]:
@@ -1105,6 +1154,55 @@ def _render_batch_inference_section() -> None:
         return
 
     _render_batch_inference_preview(batch_inference_result)
+    _render_batch_inference_evaluation_section(batch_inference_result)
+
+
+def _render_batch_inference_evaluation_section(
+    batch_inference_result: BatchTextInferenceResult,
+) -> None:
+    """Отрисовывает блок оценки пакетного инференса на размеченном CSV."""
+    import streamlit as st
+
+    current_source_key = str(batch_inference_result.paths.predictions_path)
+    if "batch_inference_evaluation_result" not in st.session_state:
+        st.session_state.batch_inference_evaluation_result = None
+    if "batch_inference_evaluation_source_key" not in st.session_state:
+        st.session_state.batch_inference_evaluation_source_key = None
+
+    if st.session_state.batch_inference_evaluation_source_key != current_source_key:
+        st.session_state.batch_inference_evaluation_result = None
+        st.session_state.batch_inference_evaluation_source_key = current_source_key
+
+    st.subheader("Оценка пакетного инференса")
+    st.caption(
+        "Если во входном CSV есть колонка истинного класса, на этом этапе можно рассчитать "
+        "Accuracy, Precision, Recall, F1-score и построить матрицу ошибок."
+    )
+
+    if st.button(
+        "Рассчитать метрики для размеченного CSV",
+        use_container_width=True,
+    ):
+        try:
+            _reset_batch_inference_evaluation_state()
+            st.session_state.batch_inference_evaluation_result = evaluate_batch_inference(
+                batch_inference_result
+            )
+            st.session_state.batch_inference_evaluation_source_key = current_source_key
+        except BatchInferenceEvaluationError as error:
+            st.session_state.batch_inference_evaluation_result = None
+            st.session_state.batch_inference_evaluation_source_key = current_source_key
+            st.error(str(error))
+
+    evaluation_result = st.session_state.batch_inference_evaluation_result
+    if evaluation_result is None:
+        st.info(
+            "После расчета здесь появятся метрики качества и матрица ошибок для тех строк, "
+            "где во входном CSV есть истинная метка класса."
+        )
+        return
+
+    _render_batch_inference_evaluation_preview(evaluation_result)
 
 
 def _render_evaluation_section(

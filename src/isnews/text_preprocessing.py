@@ -103,8 +103,8 @@ def clean_text_value(text: str, config: TextPreprocessingConfig) -> str:
     return cleaned_text
 
 
-def _clean_label(label: str) -> str:
-    """Нормализует пробелы и обрезает края в названиях классов."""
+def clean_label_value(label: str) -> str:
+    """Нормализует одиночную метку класса так же, как при предобработке датасета."""
     return re.sub(r"\s+", " ", label).strip()
 
 
@@ -179,7 +179,7 @@ def preprocess_dataset(
     )
     processed_dataframe["text"] = cleaned_texts
     processed_dataframe["label"] = (
-        processed_dataframe["label"].astype("string").fillna("").map(_clean_label)
+        processed_dataframe["label"].astype("string").fillna("").map(clean_label_value)
     )
 
     changed_text_rows = int((original_texts != cleaned_texts).sum())
