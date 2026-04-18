@@ -88,6 +88,11 @@ from src.isnews.saved_artifacts_loading import (
     SavedArtifactsLoadingResult,
     load_saved_artifacts,
 )
+from src.isnews.transformers_artifacts_loading import (
+    TransformersArtifactsLoadingError,
+    TransformersArtifactsLoadingResult,
+    load_transformers_artifacts,
+)
 from src.isnews.single_text_inference import (
     SingleTextInferenceError,
     SingleTextInferenceResult,
@@ -405,6 +410,49 @@ def _render_loaded_artifacts_preview(
                 f"- загруженная модель: `{loaded_artifacts_result.paths.model_path}`;",
                 f"- загруженный векторизатор: `{loaded_artifacts_result.paths.vectorizer_path}`;",
                 f"- JSON-отчет о загрузке: `{loaded_artifacts_result.paths.report_path}`.",
+            ]
+        )
+    )
+
+
+def _render_loaded_transformers_artifacts_preview(
+    loaded_transformers_result: TransformersArtifactsLoadingResult,
+) -> None:
+    """Показывает результат загрузки сохраненной transformers-модели и токенизатора."""
+    import streamlit as st
+
+    loading_report = loaded_transformers_result.report
+
+    st.success("Локальные transformers-артефакты успешно загружены.")
+
+    metric_column_1, metric_column_2, metric_column_3, metric_column_4 = st.columns(4)
+    metric_column_1.metric("Классов", loading_report.num_labels)
+    metric_column_2.metric("Размер словаря", loading_report.vocabulary_size)
+    metric_column_3.metric("Позиции", loading_report.max_position_embeddings)
+    metric_column_4.metric(
+        "State dict",
+        "да" if loading_report.state_dict_loaded else "нет",
+    )
+
+    for warning_message in loading_report.warning_messages:
+        st.warning(warning_message)
+
+    id2label_text = ", ".join(
+        f"{label_id}:{label_name}"
+        for label_id, label_name in loading_report.id2label.items()
+    ) or "не задан"
+    st.markdown(
+        "\n".join(
+            [
+                f"- тип модели: `{loading_report.model_type}`;",
+                f"- тип токенизатора: `{loading_report.tokenizer_type}`;",
+                f"- тип конфигурации: `{loading_report.config_model_type}`;",
+                f"- базовая модель: `{loading_report.base_model_name}`;",
+                f"- `id2label`: `{id2label_text}`;",
+                f"- каталог модели: `{loaded_transformers_result.paths.model_directory_path}`;",
+                f"- каталог токенизатора: `{loaded_transformers_result.paths.tokenizer_directory_path}`;",
+                f"- файл `state_dict`: `{loaded_transformers_result.paths.state_dict_path}`;",
+                f"- JSON-отчет о загрузке: `{loaded_transformers_result.paths.report_path}`.",
             ]
         )
     )
@@ -960,6 +1008,14 @@ def _reset_saved_artifacts_state() -> None:
     st.session_state.loaded_artifacts_selection_key = None
 
 
+def _reset_transformers_artifacts_state() -> None:
+    """Сбрасывает состояние загрузки нейросетевых артефактов при смене выбранных путей."""
+    import streamlit as st
+
+    st.session_state.loaded_transformers_artifacts_result = None
+    st.session_state.loaded_transformers_artifacts_selection_key = None
+
+
 def _reset_single_inference_state() -> None:
     """Сбрасывает состояние одиночного инференса при смене текста или источника модели."""
     import streamlit as st
@@ -1341,6 +1397,123 @@ def _render_saved_artifacts_loading_section() -> None:
         return
 
     _render_loaded_artifacts_preview(loaded_artifacts_result)
+
+
+def _render_transformers_artifacts_loading_section() -> None:
+    """Отрисовывает блок загрузки локальной transformers-модели без переобучения."""
+    import streamlit as st
+
+    if "loaded_transformers_artifacts_result" not in st.session_state:
+        st.session_state.loaded_transformers_artifacts_result = None
+    if "loaded_transformers_artifacts_selection_key" not in st.session_state:
+        st.session_state.loaded_transformers_artifacts_selection_key = None
+
+    model_directories = sorted(
+        path
+        for path in PROJECT_PATHS.models_dir.iterdir()
+        if path.is_dir() and (path / "config.json").exists()
+    )
+    tokenizer_directories = sorted(
+        path
+        for path in PROJECT_PATHS.models_dir.iterdir()
+        if path.is_dir() and (path / "tokenizer_config.json").exists()
+    )
+    state_dict_paths = sorted(PROJECT_PATHS.models_dir.glob("model*.pt"))
+
+    st.subheader("Загрузка transformers-модели")
+    st.caption(
+        "Этот блок позволяет выбрать локальные каталоги `save_pretrained` для модели и "
+        "токенизатора, а также при необходимости подключить файл весов `model*.pt`."
+    )
+
+    if not model_directories or not tokenizer_directories:
+        _reset_transformers_artifacts_state()
+        st.info(
+            "В каталоге `models` пока нет полного набора локальных transformers-артефактов. "
+            "Сначала выгрузите их из Google Colab или добавьте в проект."
+        )
+        return
+
+    model_options = {path.name: path for path in model_directories}
+    tokenizer_options = {path.name: path for path in tokenizer_directories}
+    state_dict_options = {"Без файла .pt": None}
+    state_dict_options.update({path.name: path for path in state_dict_paths})
+
+    selection_column_1, selection_column_2, selection_column_3 = st.columns(3)
+    with selection_column_1:
+        selected_model_name = st.selectbox(
+            "Каталог модели",
+            options=list(model_options.keys()),
+            key="saved_transformers_model_directory",
+        )
+    with selection_column_2:
+        selected_tokenizer_name = st.selectbox(
+            "Каталог токенизатора",
+            options=list(tokenizer_options.keys()),
+            key="saved_transformers_tokenizer_directory",
+        )
+    with selection_column_3:
+        selected_state_dict_name = st.selectbox(
+            "Файл весов",
+            options=list(state_dict_options.keys()),
+            key="saved_transformers_state_dict",
+        )
+
+    current_selection_key = (
+        f"{selected_model_name}|{selected_tokenizer_name}|{selected_state_dict_name}"
+    )
+    if (
+        st.session_state.loaded_transformers_artifacts_selection_key
+        != current_selection_key
+    ):
+        st.session_state.loaded_transformers_artifacts_result = None
+        st.session_state.loaded_transformers_artifacts_selection_key = (
+            current_selection_key
+        )
+
+    selected_state_dict_path = state_dict_options[selected_state_dict_name]
+    st.markdown(
+        "\n".join(
+            [
+                f"- выбранный каталог модели: `{model_options[selected_model_name]}`;",
+                f"- выбранный каталог токенизатора: `{tokenizer_options[selected_tokenizer_name]}`;",
+                f"- выбранный файл весов: `{selected_state_dict_path}`;",
+            ]
+        )
+    )
+
+    if st.button(
+        "Загрузить transformers-артефакты",
+        use_container_width=True,
+    ):
+        try:
+            _reset_transformers_artifacts_state()
+            st.session_state.loaded_transformers_artifacts_result = (
+                load_transformers_artifacts(
+                    model_options[selected_model_name],
+                    tokenizer_options[selected_tokenizer_name],
+                    state_dict_path=selected_state_dict_path,
+                )
+            )
+            st.session_state.loaded_transformers_artifacts_selection_key = (
+                current_selection_key
+            )
+        except TransformersArtifactsLoadingError as error:
+            st.session_state.loaded_transformers_artifacts_result = None
+            st.session_state.loaded_transformers_artifacts_selection_key = (
+                current_selection_key
+            )
+            st.error(str(error))
+
+    loaded_transformers_result = st.session_state.loaded_transformers_artifacts_result
+    if loaded_transformers_result is None:
+        st.info(
+            "После загрузки здесь появятся сведения о типе модели, размере словаря, "
+            "числе классов и пути к JSON-отчету."
+        )
+        return
+
+    _render_loaded_transformers_artifacts_preview(loaded_transformers_result)
 
 
 def _render_single_inference_section() -> None:
@@ -2256,6 +2429,7 @@ def render_main_page() -> None:
 
     _render_dataset_loading_section()
     _render_saved_artifacts_loading_section()
+    _render_transformers_artifacts_loading_section()
     _render_single_inference_section()
     _render_batch_inference_section()
     _render_experiment_registry_section()
