@@ -7,6 +7,7 @@ import pandas as pd
 from src.isnews.config import PROJECT_PATHS
 from src.isnews.data_loading import DatasetLoadResult, DatasetValidationError
 from src.isnews.data_loading import load_dataset_from_uploaded_bytes, load_dataset_from_url
+from src.isnews.dataset_split import DatasetSplitError, DatasetSplitResult, split_dataset
 from src.isnews.text_preprocessing import TextPreprocessingError, TextPreprocessingResult
 from src.isnews.text_preprocessing import preprocess_dataset
 
@@ -104,12 +105,84 @@ def _render_preprocessing_preview(
     st.dataframe(preprocessing_result.dataframe.head(10), use_container_width=True)
 
 
+def _render_split_preview(split_result: DatasetSplitResult) -> None:
+    """Показывает результат разбиения очищенного датасета на три подвыборки."""
+    import streamlit as st
+
+    split_report = split_result.report
+    split_overview_table = pd.DataFrame(
+        [
+            {
+                "Подвыборка": "train",
+                "Строк": split_report.train_rows,
+                "Уникальных классов": split_result.train_summary.unique_classes,
+                "Средняя длина текста, слов": split_result.train_summary.text_length_words.mean,
+            },
+            {
+                "Подвыборка": "validation",
+                "Строк": split_report.validation_rows,
+                "Уникальных классов": split_result.validation_summary.unique_classes,
+                "Средняя длина текста, слов": split_result.validation_summary.text_length_words.mean,
+            },
+            {
+                "Подвыборка": "test",
+                "Строк": split_report.test_rows,
+                "Уникальных классов": split_result.test_summary.unique_classes,
+                "Средняя длина текста, слов": split_result.test_summary.text_length_words.mean,
+            },
+        ]
+    )
+
+    st.success(
+        "Разбиение датасета сохранено в каталог: "
+        f"`{split_result.paths.directory}`"
+    )
+
+    metric_column_1, metric_column_2, metric_column_3, metric_column_4 = st.columns(4)
+    metric_column_1.metric("Train", split_report.train_rows)
+    metric_column_2.metric("Validation", split_report.validation_rows)
+    metric_column_3.metric("Test", split_report.test_rows)
+    metric_column_4.metric(
+        "Стратификация",
+        "да" if split_report.stratified_split_used else "нет",
+    )
+
+    for warning_message in split_report.warning_messages:
+        st.warning(warning_message)
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- `train.csv`: `{split_result.paths.train_path}`;",
+                f"- `validation.csv`: `{split_result.paths.validation_path}`;",
+                f"- `test.csv`: `{split_result.paths.test_path}`;",
+                f"- JSON-отчет: `{split_result.paths.report_path}`.",
+            ]
+        )
+    )
+
+    st.write("Сводка по подвыборкам:")
+    st.dataframe(split_overview_table, use_container_width=True)
+
+    st.write("Первые 5 строк train-выборки:")
+    st.dataframe(split_result.train_dataframe.head(5), use_container_width=True)
+
+
+def _reset_split_state() -> None:
+    """Сбрасывает состояние разбиения при смене подготовленного датасета."""
+    import streamlit as st
+
+    st.session_state.split_result = None
+    st.session_state.split_source_key = None
+
+
 def _reset_preprocessing_state() -> None:
     """Сбрасывает результат предобработки при смене загруженного датасета."""
     import streamlit as st
 
     st.session_state.preprocessing_result = None
     st.session_state.preprocessing_dataset_key = None
+    _reset_split_state()
 
 
 def _render_preprocessing_section(dataset_result: DatasetLoadResult) -> None:
@@ -138,6 +211,7 @@ def _render_preprocessing_section(dataset_result: DatasetLoadResult) -> None:
         use_container_width=True,
     ):
         try:
+            _reset_split_state()
             st.session_state.preprocessing_result = preprocess_dataset(
                 dataset_result.dataframe,
                 source_dataset_path=dataset_result.saved_path,
@@ -145,6 +219,7 @@ def _render_preprocessing_section(dataset_result: DatasetLoadResult) -> None:
             st.session_state.preprocessing_dataset_key = current_dataset_key
         except TextPreprocessingError as error:
             st.session_state.preprocessing_result = None
+            _reset_split_state()
             st.error(str(error))
 
     preprocessing_result = st.session_state.preprocessing_result
@@ -156,6 +231,52 @@ def _render_preprocessing_section(dataset_result: DatasetLoadResult) -> None:
         return
 
     _render_preprocessing_preview(preprocessing_result)
+
+
+def _render_split_section(preprocessing_result: TextPreprocessingResult) -> None:
+    """Отрисовывает блок разбиения очищенного датасета на train, validation и test."""
+    import streamlit as st
+
+    current_source_key = str(preprocessing_result.saved_path)
+    if "split_result" not in st.session_state:
+        st.session_state.split_result = None
+    if "split_source_key" not in st.session_state:
+        st.session_state.split_source_key = None
+
+    if st.session_state.split_source_key != current_source_key:
+        st.session_state.split_result = None
+        st.session_state.split_source_key = current_source_key
+
+    st.subheader("Разбиение датасета")
+    st.caption(
+        "Подготовленный датасет разбивается на `train`, `validation` и `test` "
+        "в долях 70% / 15% / 15%. По возможности используется стратификация по метке класса."
+    )
+
+    if st.button(
+        "Сформировать train / validation / test",
+        use_container_width=True,
+    ):
+        try:
+            _reset_split_state()
+            st.session_state.split_result = split_dataset(
+                preprocessing_result.dataframe,
+                source_dataset_path=preprocessing_result.saved_path,
+            )
+            st.session_state.split_source_key = current_source_key
+        except DatasetSplitError as error:
+            st.session_state.split_result = None
+            st.error(str(error))
+
+    split_result = st.session_state.split_result
+    if split_result is None:
+        st.info(
+            "После запуска разбиения здесь появятся размеры подвыборок, пути к CSV "
+            "и отчет по train / validation / test."
+        )
+        return
+
+    _render_split_preview(split_result)
 
 
 def _render_dataset_preview(dataset_result: DatasetLoadResult) -> None:
@@ -274,6 +395,9 @@ def _render_dataset_loading_section() -> None:
 
     _render_dataset_preview(dataset_result)
     _render_preprocessing_section(dataset_result)
+    preprocessing_result = st.session_state.get("preprocessing_result")
+    if preprocessing_result is not None:
+        _render_split_section(preprocessing_result)
 
 
 def render_main_page() -> None:
@@ -323,11 +447,13 @@ def render_main_page() -> None:
                 f"Каталог данных: {PROJECT_PATHS.data_dir}",
                 f"Каталог исходных датасетов: {PROJECT_PATHS.raw_data_dir}",
                 f"Каталог очищенных датасетов: {PROJECT_PATHS.processed_data_dir}",
+                f"Каталог выборок train/validation/test: {PROJECT_PATHS.split_data_dir}",
                 f"Каталог моделей: {PROJECT_PATHS.models_dir}",
                 f"Каталог ноутбуков: {PROJECT_PATHS.notebooks_dir}",
                 f"Каталог отчетов: {PROJECT_PATHS.reports_dir}",
                 f"Каталог JSON-сводок: {PROJECT_PATHS.dataset_reports_dir}",
                 f"Каталог отчетов предобработки: {PROJECT_PATHS.preprocessing_reports_dir}",
+                f"Каталог отчетов по сплитам: {PROJECT_PATHS.split_reports_dir}",
             ]
         ),
         language="text",

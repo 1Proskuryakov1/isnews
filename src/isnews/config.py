@@ -16,11 +16,13 @@ class ProjectPaths:
     data_dir: Path
     raw_data_dir: Path
     processed_data_dir: Path
+    split_data_dir: Path
     models_dir: Path
     notebooks_dir: Path
     reports_dir: Path
     dataset_reports_dir: Path
     preprocessing_reports_dir: Path
+    split_reports_dir: Path
 
     @classmethod
     def from_root(cls, root: Path | None = None) -> "ProjectPaths":
@@ -33,11 +35,13 @@ class ProjectPaths:
             data_dir=resolved_root / "data",
             raw_data_dir=resolved_root / "data" / "raw",
             processed_data_dir=resolved_root / "data" / "processed",
+            split_data_dir=resolved_root / "data" / "splits",
             models_dir=resolved_root / "models",
             notebooks_dir=resolved_root / "notebooks",
             reports_dir=resolved_root / "reports",
             dataset_reports_dir=resolved_root / "reports" / "datasets",
             preprocessing_reports_dir=resolved_root / "reports" / "preprocessing",
+            split_reports_dir=resolved_root / "reports" / "splits",
         )
 
     @property
@@ -48,11 +52,13 @@ class ProjectPaths:
             self.data_dir,
             self.raw_data_dir,
             self.processed_data_dir,
+            self.split_data_dir,
             self.models_dir,
             self.notebooks_dir,
             self.reports_dir,
             self.dataset_reports_dir,
             self.preprocessing_reports_dir,
+            self.split_reports_dir,
         )
 
     def ensure_directories(self) -> None:
