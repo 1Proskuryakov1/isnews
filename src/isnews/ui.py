@@ -10,6 +10,11 @@ from src.isnews.data_loading import load_dataset_from_uploaded_bytes, load_datas
 from src.isnews.dataset_split import DatasetSplitError, DatasetSplitResult, split_dataset
 from src.isnews.text_preprocessing import TextPreprocessingError, TextPreprocessingResult
 from src.isnews.text_preprocessing import preprocess_dataset
+from src.isnews.tfidf_vectorization import (
+    TfidfVectorizationError,
+    TfidfVectorizationResult,
+    vectorize_split_result,
+)
 
 
 def _render_dataset_statistics(dataset_result: DatasetLoadResult) -> None:
@@ -168,12 +173,83 @@ def _render_split_preview(split_result: DatasetSplitResult) -> None:
     st.dataframe(split_result.train_dataframe.head(5), use_container_width=True)
 
 
+def _render_vectorization_preview(
+    vectorization_result: TfidfVectorizationResult,
+) -> None:
+    """Показывает результат TF-IDF-векторизации и пути к сохраненным артефактам."""
+    import streamlit as st
+
+    vectorization_report = vectorization_result.report
+    matrix_table = pd.DataFrame(
+        [
+            {
+                "Матрица": "train",
+                "Форма": f"{vectorization_report.train_shape[0]} x {vectorization_report.train_shape[1]}",
+                "Плотность": vectorization_report.train_density,
+                "Файл": str(vectorization_result.paths.train_matrix_path),
+            },
+            {
+                "Матрица": "validation",
+                "Форма": f"{vectorization_report.validation_shape[0]} x {vectorization_report.validation_shape[1]}",
+                "Плотность": vectorization_report.validation_density,
+                "Файл": str(vectorization_result.paths.validation_matrix_path),
+            },
+            {
+                "Матрица": "test",
+                "Форма": f"{vectorization_report.test_shape[0]} x {vectorization_report.test_shape[1]}",
+                "Плотность": vectorization_report.test_density,
+                "Файл": str(vectorization_result.paths.test_matrix_path),
+            },
+        ]
+    )
+
+    st.success(
+        "TF-IDF-признаки и векторизатор успешно сохранены."
+    )
+
+    metric_column_1, metric_column_2, metric_column_3 = st.columns(3)
+    metric_column_1.metric("Размер словаря", vectorization_report.vocabulary_size)
+    metric_column_2.metric(
+        "Признаков в train",
+        vectorization_report.train_shape[1],
+    )
+    metric_column_3.metric(
+        "Плотность train",
+        vectorization_report.train_density,
+    )
+
+    for warning_message in vectorization_report.warning_messages:
+        st.warning(warning_message)
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- каталог sparse-матриц: `{vectorization_result.paths.feature_directory}`;",
+                f"- сохраненный векторизатор: `{vectorization_result.paths.vectorizer_path}`;",
+                f"- JSON-отчет: `{vectorization_result.paths.report_path}`.",
+            ]
+        )
+    )
+
+    st.write("Сводка по матрицам признаков:")
+    st.dataframe(matrix_table, use_container_width=True)
+
+
+def _reset_vectorization_state() -> None:
+    """Сбрасывает результат TF-IDF-векторизации при смене сплита."""
+    import streamlit as st
+
+    st.session_state.vectorization_result = None
+    st.session_state.vectorization_source_key = None
+
+
 def _reset_split_state() -> None:
     """Сбрасывает состояние разбиения при смене подготовленного датасета."""
     import streamlit as st
 
     st.session_state.split_result = None
     st.session_state.split_source_key = None
+    _reset_vectorization_state()
 
 
 def _reset_preprocessing_state() -> None:
@@ -266,6 +342,7 @@ def _render_split_section(preprocessing_result: TextPreprocessingResult) -> None
             st.session_state.split_source_key = current_source_key
         except DatasetSplitError as error:
             st.session_state.split_result = None
+            _reset_vectorization_state()
             st.error(str(error))
 
     split_result = st.session_state.split_result
@@ -277,6 +354,49 @@ def _render_split_section(preprocessing_result: TextPreprocessingResult) -> None
         return
 
     _render_split_preview(split_result)
+
+
+def _render_vectorization_section(split_result: DatasetSplitResult) -> None:
+    """Отрисовывает блок TF-IDF-векторизации поверх сохраненных сплитов."""
+    import streamlit as st
+
+    current_source_key = str(split_result.paths.directory)
+    if "vectorization_result" not in st.session_state:
+        st.session_state.vectorization_result = None
+    if "vectorization_source_key" not in st.session_state:
+        st.session_state.vectorization_source_key = None
+
+    if st.session_state.vectorization_source_key != current_source_key:
+        st.session_state.vectorization_result = None
+        st.session_state.vectorization_source_key = current_source_key
+
+    st.subheader("TF-IDF-векторизация")
+    st.caption(
+        "Векторизатор обучается только на `train`-части, после чего применяется "
+        "к `validation` и `test`. Результат сохраняется как sparse-матрицы и `.joblib`."
+    )
+
+    if st.button(
+        "Построить TF-IDF признаки и сохранить векторизатор",
+        use_container_width=True,
+    ):
+        try:
+            _reset_vectorization_state()
+            st.session_state.vectorization_result = vectorize_split_result(split_result)
+            st.session_state.vectorization_source_key = current_source_key
+        except TfidfVectorizationError as error:
+            st.session_state.vectorization_result = None
+            st.error(str(error))
+
+    vectorization_result = st.session_state.vectorization_result
+    if vectorization_result is None:
+        st.info(
+            "После запуска векторизации здесь появятся формы матриц признаков, "
+            "размер словаря и пути к сохраненным артефактам."
+        )
+        return
+
+    _render_vectorization_preview(vectorization_result)
 
 
 def _render_dataset_preview(dataset_result: DatasetLoadResult) -> None:
@@ -398,6 +518,9 @@ def _render_dataset_loading_section() -> None:
     preprocessing_result = st.session_state.get("preprocessing_result")
     if preprocessing_result is not None:
         _render_split_section(preprocessing_result)
+    split_result = st.session_state.get("split_result")
+    if split_result is not None:
+        _render_vectorization_section(split_result)
 
 
 def render_main_page() -> None:
@@ -448,12 +571,15 @@ def render_main_page() -> None:
                 f"Каталог исходных датасетов: {PROJECT_PATHS.raw_data_dir}",
                 f"Каталог очищенных датасетов: {PROJECT_PATHS.processed_data_dir}",
                 f"Каталог выборок train/validation/test: {PROJECT_PATHS.split_data_dir}",
+                f"Каталог матриц признаков: {PROJECT_PATHS.feature_data_dir}",
                 f"Каталог моделей: {PROJECT_PATHS.models_dir}",
+                f"Каталог векторизаторов: {PROJECT_PATHS.vectorizers_dir}",
                 f"Каталог ноутбуков: {PROJECT_PATHS.notebooks_dir}",
                 f"Каталог отчетов: {PROJECT_PATHS.reports_dir}",
                 f"Каталог JSON-сводок: {PROJECT_PATHS.dataset_reports_dir}",
                 f"Каталог отчетов предобработки: {PROJECT_PATHS.preprocessing_reports_dir}",
                 f"Каталог отчетов по сплитам: {PROJECT_PATHS.split_reports_dir}",
+                f"Каталог отчетов по векторизации: {PROJECT_PATHS.vectorization_reports_dir}",
             ]
         ),
         language="text",
