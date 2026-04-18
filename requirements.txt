@@ -4,6 +4,7 @@ pandas
 numpy
 requests
 joblib
+python-docx
 
 # Библиотеки для классических моделей машинного обучения
 scikit-learn
