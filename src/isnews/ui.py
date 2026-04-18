@@ -23,6 +23,11 @@ from src.isnews.detailed_model_evaluation import (
 )
 from src.isnews.data_loading import load_dataset_from_uploaded_bytes, load_dataset_from_url
 from src.isnews.dataset_split import DatasetSplitError, DatasetSplitResult, split_dataset
+from src.isnews.experiment_registry import (
+    ExperimentRegistryError,
+    ExperimentRegistryResult,
+    export_experiment_registry,
+)
 from src.isnews.logistic_regression_training import (
     LogisticRegressionTrainingError,
     LogisticRegressionTrainingResult,
@@ -461,6 +466,46 @@ def _render_batch_inference_evaluation_preview(
 
     st.write("Матрица ошибок:")
     st.dataframe(evaluation_result.confusion_matrix_dataframe, use_container_width=True)
+
+
+def _render_experiment_registry_preview(
+    registry_result: ExperimentRegistryResult,
+) -> None:
+    """Показывает сводную таблицу по найденным экспериментам и пути к экспортам."""
+    import streamlit as st
+
+    registry_dataframe = registry_result.dataframe
+
+    st.success("Сводный реестр экспериментов успешно сформирован.")
+
+    metric_column_1, metric_column_2, metric_column_3 = st.columns(3)
+    metric_column_1.metric("Всего записей", len(registry_dataframe))
+    metric_column_2.metric(
+        "Запусков обучения",
+        int((registry_dataframe.get("record_type", pd.Series(dtype="string")) == "training_run").sum()),
+    )
+    metric_column_3.metric(
+        "Пакетных оценок",
+        int((registry_dataframe.get("record_type", pd.Series(dtype="string")) == "batch_evaluation").sum()),
+    )
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- CSV-реестр: `{registry_result.paths.csv_path}`;",
+                f"- JSON-реестр: `{registry_result.paths.json_path}`.",
+            ]
+        )
+    )
+
+    if registry_dataframe.empty:
+        st.info(
+            "Пока не найдено сохраненных отчетов экспериментов. После обучения модели и расчета метрик здесь появятся записи."
+        )
+        return
+
+    st.write("Первые 20 записей реестра:")
+    st.dataframe(registry_dataframe.head(20), use_container_width=True)
 
 
 def _render_evaluation_preview(
@@ -1205,6 +1250,39 @@ def _render_batch_inference_evaluation_section(
     _render_batch_inference_evaluation_preview(evaluation_result)
 
 
+def _render_experiment_registry_section() -> None:
+    """Отрисовывает блок экспорта единого реестра экспериментов по проекту."""
+    import streamlit as st
+
+    if "experiment_registry_result" not in st.session_state:
+        st.session_state.experiment_registry_result = None
+
+    st.subheader("Сводка экспериментов")
+    st.caption(
+        "На этом этапе можно собрать единый CSV/JSON-реестр по найденным запускам обучения, "
+        "оценки модели и пакетного тестирования на размеченных CSV."
+    )
+
+    if st.button(
+        "Сформировать сводный реестр экспериментов",
+        use_container_width=True,
+    ):
+        try:
+            st.session_state.experiment_registry_result = export_experiment_registry()
+        except ExperimentRegistryError as error:
+            st.session_state.experiment_registry_result = None
+            st.error(str(error))
+
+    registry_result = st.session_state.experiment_registry_result
+    if registry_result is None:
+        st.info(
+            "После запуска здесь появится единая таблица по экспериментам, а также пути к экспортированным CSV и JSON."
+        )
+        return
+
+    _render_experiment_registry_preview(registry_result)
+
+
 def _render_evaluation_section(
     split_result: DatasetSplitResult,
     vectorization_result: TfidfVectorizationResult,
@@ -1499,6 +1577,7 @@ def render_main_page() -> None:
     _render_saved_artifacts_loading_section()
     _render_single_inference_section()
     _render_batch_inference_section()
+    _render_experiment_registry_section()
 
     st.subheader("Базовые директории проекта")
     st.code(
@@ -1525,6 +1604,7 @@ def render_main_page() -> None:
                 f"Каталог подробных отчетов: {PROJECT_PATHS.detailed_metrics_reports_dir}",
                 f"Каталог отчетов по загрузке артефактов: {PROJECT_PATHS.loading_reports_dir}",
                 f"Каталог отчетов по инференсу: {PROJECT_PATHS.inference_reports_dir}",
+                f"Каталог сводных реестров экспериментов: {PROJECT_PATHS.experiment_reports_dir}",
             ]
         ),
         language="text",
