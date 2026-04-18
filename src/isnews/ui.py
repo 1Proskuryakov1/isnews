@@ -2,9 +2,58 @@
 
 from __future__ import annotations
 
+import pandas as pd
+
 from src.isnews.config import PROJECT_PATHS
 from src.isnews.data_loading import DatasetLoadResult, DatasetValidationError
 from src.isnews.data_loading import load_dataset_from_uploaded_bytes, load_dataset_from_url
+
+
+def _render_dataset_statistics(dataset_result: DatasetLoadResult) -> None:
+    """Показывает статистику по классам и длине текстов для корректных строк."""
+    import streamlit as st
+
+    dataset_summary = dataset_result.dataset_summary
+    class_distribution_table = pd.DataFrame(
+        [
+            {
+                "Класс": item.label,
+                "Количество": item.count,
+                "Доля": round(item.share * 100, 2),
+            }
+            for item in dataset_summary.class_distribution
+        ]
+    )
+
+    st.subheader("Сводка по датасету")
+    metric_column_1, metric_column_2, metric_column_3 = st.columns(3)
+    metric_column_1.metric("Уникальных классов", dataset_summary.unique_classes)
+    metric_column_2.metric(
+        "Средняя длина текста, символов",
+        dataset_summary.text_length_chars.mean,
+    )
+    metric_column_3.metric(
+        "Средняя длина текста, слов",
+        dataset_summary.text_length_words.mean,
+    )
+
+    st.write("Распределение классов по корректным строкам:")
+    st.dataframe(class_distribution_table, use_container_width=True)
+
+    st.write("Статистика длины текстов:")
+    st.markdown(
+        "\n".join(
+            [
+                f"- символы: min `{dataset_summary.text_length_chars.minimum}`, "
+                f"median `{dataset_summary.text_length_chars.median}`, "
+                f"max `{dataset_summary.text_length_chars.maximum}`;",
+                f"- слова: min `{dataset_summary.text_length_words.minimum}`, "
+                f"median `{dataset_summary.text_length_words.median}`, "
+                f"max `{dataset_summary.text_length_words.maximum}`;",
+                f"- JSON-сводка сохранена в `{dataset_result.summary_path}`.",
+            ]
+        )
+    )
 
 
 def _render_dataset_preview(dataset_result: DatasetLoadResult) -> None:
@@ -40,6 +89,8 @@ def _render_dataset_preview(dataset_result: DatasetLoadResult) -> None:
     for warning_message in validation_report.warning_messages:
         st.warning(warning_message)
 
+    _render_dataset_statistics(dataset_result)
+
     st.write("Названия колонок:")
     st.code(", ".join(str(column) for column in dataset_result.dataframe.columns))
 
@@ -53,6 +104,8 @@ def _render_dataset_loading_section() -> None:
 
     if "dataset_result" not in st.session_state:
         st.session_state.dataset_result = None
+    if "loaded_local_file_key" not in st.session_state:
+        st.session_state.loaded_local_file_key = None
 
     st.subheader("Загрузка датасета")
     st.caption(
@@ -73,14 +126,20 @@ def _render_dataset_loading_section() -> None:
         )
 
         if uploaded_file is not None:
-            try:
-                st.session_state.dataset_result = load_dataset_from_uploaded_bytes(
-                    file_bytes=uploaded_file.getvalue(),
-                    source_name=uploaded_file.name,
-                )
-            except DatasetValidationError as error:
-                st.session_state.dataset_result = None
-                st.error(str(error))
+            uploaded_file_key = (uploaded_file.name, uploaded_file.size)
+            if st.session_state.loaded_local_file_key != uploaded_file_key:
+                try:
+                    st.session_state.dataset_result = load_dataset_from_uploaded_bytes(
+                        file_bytes=uploaded_file.getvalue(),
+                        source_name=uploaded_file.name,
+                    )
+                    st.session_state.loaded_local_file_key = uploaded_file_key
+                except DatasetValidationError as error:
+                    st.session_state.dataset_result = None
+                    st.session_state.loaded_local_file_key = None
+                    st.error(str(error))
+        else:
+            st.session_state.loaded_local_file_key = None
 
     with url_tab:
         dataset_url = st.text_input(
@@ -94,6 +153,7 @@ def _render_dataset_loading_section() -> None:
             else:
                 try:
                     st.session_state.dataset_result = load_dataset_from_url(dataset_url)
+                    st.session_state.loaded_local_file_key = None
                 except DatasetValidationError as error:
                     st.session_state.dataset_result = None
                     st.error(str(error))
@@ -158,6 +218,7 @@ def render_main_page() -> None:
                 f"Каталог моделей: {PROJECT_PATHS.models_dir}",
                 f"Каталог ноутбуков: {PROJECT_PATHS.notebooks_dir}",
                 f"Каталог отчетов: {PROJECT_PATHS.reports_dir}",
+                f"Каталог JSON-сводок: {PROJECT_PATHS.dataset_reports_dir}",
             ]
         ),
         language="text",

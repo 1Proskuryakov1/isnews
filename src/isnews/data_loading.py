@@ -13,6 +13,8 @@ import requests
 from pandas.errors import EmptyDataError
 
 from src.isnews.config import PROJECT_PATHS, ProjectPaths
+from src.isnews.dataset_summary import DatasetSummary, build_dataset_summary
+from src.isnews.dataset_summary import save_dataset_summary
 
 TEXT_COLUMN_CANDIDATES = (
     "text",
@@ -65,8 +67,10 @@ class DatasetLoadResult:
 
     dataframe: pd.DataFrame
     validation_report: DatasetValidationReport
+    dataset_summary: DatasetSummary
     source_name: str
     saved_path: Path
+    summary_path: Path
     row_count: int
     column_count: int
 
@@ -269,12 +273,32 @@ def _build_dataset_result(
         dataframe
     )
     saved_path = _save_dataset_copy(file_bytes, source_name, project_paths)
+    dataset_summary = build_dataset_summary(normalized_dataframe)
+    summary_path = save_dataset_summary(
+        summary=dataset_summary,
+        source_name=source_name,
+        saved_dataset_path=saved_path,
+        row_count=len(normalized_dataframe),
+        column_count=len(normalized_dataframe.columns),
+        validation_payload={
+            "text_column": validation_report.text_column,
+            "label_column": validation_report.label_column,
+            "empty_text_rows": validation_report.empty_text_rows,
+            "empty_label_rows": validation_report.empty_label_rows,
+            "invalid_rows": validation_report.invalid_rows,
+            "usable_rows": validation_report.usable_rows,
+            "warning_messages": list(validation_report.warning_messages),
+        },
+        project_paths=project_paths,
+    )
 
     return DatasetLoadResult(
         dataframe=normalized_dataframe,
         validation_report=validation_report,
+        dataset_summary=dataset_summary,
         source_name=source_name,
         saved_path=saved_path,
+        summary_path=summary_path,
         row_count=len(normalized_dataframe),
         column_count=len(normalized_dataframe.columns),
     )

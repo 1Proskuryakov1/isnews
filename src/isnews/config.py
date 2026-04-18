@@ -18,6 +18,7 @@ class ProjectPaths:
     models_dir: Path
     notebooks_dir: Path
     reports_dir: Path
+    dataset_reports_dir: Path
 
     @classmethod
     def from_root(cls, root: Path | None = None) -> "ProjectPaths":
@@ -32,6 +33,7 @@ class ProjectPaths:
             models_dir=resolved_root / "models",
             notebooks_dir=resolved_root / "notebooks",
             reports_dir=resolved_root / "reports",
+            dataset_reports_dir=resolved_root / "reports" / "datasets",
         )
 
     @property
@@ -44,6 +46,7 @@ class ProjectPaths:
             self.models_dir,
             self.notebooks_dir,
             self.reports_dir,
+            self.dataset_reports_dir,
         )
 
     def ensure_directories(self) -> None:
