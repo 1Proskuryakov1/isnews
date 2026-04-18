@@ -40,6 +40,7 @@ class ProjectPaths:
     markdown_reports_dir: Path
     thesis_tables_reports_dir: Path
     docx_reports_dir: Path
+    plots_reports_dir: Path
 
     @classmethod
     def from_root(cls, root: Path | None = None) -> "ProjectPaths":
@@ -76,6 +77,7 @@ class ProjectPaths:
             markdown_reports_dir=resolved_root / "reports" / "markdown",
             thesis_tables_reports_dir=resolved_root / "reports" / "tables",
             docx_reports_dir=resolved_root / "reports" / "docx",
+            plots_reports_dir=resolved_root / "reports" / "plots",
         )
 
     @property
@@ -110,6 +112,7 @@ class ProjectPaths:
             self.markdown_reports_dir,
             self.thesis_tables_reports_dir,
             self.docx_reports_dir,
+            self.plots_reports_dir,
         )
 
     def ensure_directories(self) -> None:

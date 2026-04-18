@@ -73,6 +73,11 @@ from src.isnews.prediction_confidence_analysis import (
     PredictionConfidenceAnalysisResult,
     analyze_prediction_confidence,
 )
+from src.isnews.plot_export import (
+    PlotExportError,
+    PlotExportResult,
+    export_plots,
+)
 from src.isnews.saved_artifacts_loading import (
     SavedArtifactsLoadingError,
     SavedArtifactsLoadingResult,
@@ -695,6 +700,22 @@ def _render_thesis_tables_preview(
         rows.append(f"- таблица сравнения моделей: `{thesis_tables_result.paths.comparison_table_path}`;")
     if thesis_tables_result.paths.error_table_path is not None:
         rows.append(f"- таблица ошибок: `{thesis_tables_result.paths.error_table_path}`;")
+    st.markdown("\n".join(rows))
+
+
+def _render_plot_export_preview(plot_export_result: PlotExportResult) -> None:
+    """Показывает сведения о выгруженных PNG-графиках."""
+    import streamlit as st
+
+    st.success("PNG-графики успешно сформированы.")
+    rows = [
+        f"- выгруженные графики: `{', '.join(plot_export_result.exported_plot_names)}`;",
+        f"- manifest: `{plot_export_result.paths.manifest_path}`;",
+    ]
+    if plot_export_result.paths.metrics_plot_path is not None:
+        rows.append(f"- график метрик: `{plot_export_result.paths.metrics_plot_path}`;")
+    if plot_export_result.paths.comparison_plot_path is not None:
+        rows.append(f"- график сравнения моделей: `{plot_export_result.paths.comparison_plot_path}`;")
     st.markdown("\n".join(rows))
 
 
@@ -1846,6 +1867,42 @@ def _render_thesis_tables_section() -> None:
     _render_thesis_tables_preview(thesis_tables_result)
 
 
+def _render_plot_export_section() -> None:
+    """Отрисовывает блок выгрузки PNG-графиков для ВКР и презентации."""
+    import streamlit as st
+
+    if "plot_export_result" not in st.session_state:
+        st.session_state.plot_export_result = None
+
+    st.subheader("PNG-графики")
+    st.caption(
+        "На этом этапе можно выгрузить PNG-графики по метрикам качества модели "
+        "и сравнению нескольких обученных моделей."
+    )
+
+    if st.button(
+        "Сформировать PNG-графики",
+        use_container_width=True,
+    ):
+        try:
+            st.session_state.plot_export_result = export_plots(
+                evaluation_result=st.session_state.get("evaluation_result"),
+                comparison_result=st.session_state.get("model_comparison_result"),
+            )
+        except PlotExportError as error:
+            st.session_state.plot_export_result = None
+            st.error(str(error))
+
+    plot_export_result = st.session_state.plot_export_result
+    if plot_export_result is None:
+        st.info(
+            "После запуска здесь появятся пути к PNG-графикам по текущим результатам."
+        )
+        return
+
+    _render_plot_export_preview(plot_export_result)
+
+
 def _render_evaluation_section(
     split_result: DatasetSplitResult,
     vectorization_result: TfidfVectorizationResult,
@@ -2146,6 +2203,7 @@ def render_main_page() -> None:
     _render_docx_report_section()
     _render_markdown_report_section()
     _render_thesis_tables_section()
+    _render_plot_export_section()
 
     st.subheader("Базовые директории проекта")
     st.code(
@@ -2180,6 +2238,7 @@ def render_main_page() -> None:
                 f"Каталог DOCX-отчетов: {PROJECT_PATHS.docx_reports_dir}",
                 f"Каталог Markdown-отчетов: {PROJECT_PATHS.markdown_reports_dir}",
                 f"Каталог CSV-таблиц для ВКР: {PROJECT_PATHS.thesis_tables_reports_dir}",
+                f"Каталог PNG-графиков: {PROJECT_PATHS.plots_reports_dir}",
             ]
         ),
         language="text",
