@@ -7,6 +7,8 @@ import pandas as pd
 from src.isnews.config import PROJECT_PATHS
 from src.isnews.data_loading import DatasetLoadResult, DatasetValidationError
 from src.isnews.data_loading import load_dataset_from_uploaded_bytes, load_dataset_from_url
+from src.isnews.text_preprocessing import TextPreprocessingError, TextPreprocessingResult
+from src.isnews.text_preprocessing import preprocess_dataset
 
 
 def _render_dataset_statistics(dataset_result: DatasetLoadResult) -> None:
@@ -54,6 +56,106 @@ def _render_dataset_statistics(dataset_result: DatasetLoadResult) -> None:
             ]
         )
     )
+
+
+def _render_preprocessing_preview(
+    preprocessing_result: TextPreprocessingResult,
+) -> None:
+    """Показывает результаты очистки текста и сохранения обработанного датасета."""
+    import streamlit as st
+
+    preprocessing_report = preprocessing_result.report
+    preprocessing_summary = preprocessing_result.summary
+
+    st.success(
+        "Очищенный датасет сохранен: "
+        f"`{preprocessing_result.saved_path}`"
+    )
+
+    metric_column_1, metric_column_2, metric_column_3, metric_column_4 = st.columns(4)
+    metric_column_1.metric("Строк до очистки", preprocessing_report.rows_before)
+    metric_column_2.metric("Строк после очистки", preprocessing_report.rows_after)
+    metric_column_3.metric(
+        "Удалено дубликатов",
+        preprocessing_report.removed_duplicate_rows,
+    )
+    metric_column_4.metric(
+        "Изменено текстов",
+        preprocessing_report.changed_text_rows,
+    )
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- удалено неполных строк до очистки: "
+                f"`{preprocessing_report.removed_invalid_rows}`;",
+                f"- удалено пустых строк после очистки: "
+                f"`{preprocessing_report.removed_empty_after_cleaning_rows}`;",
+                f"- уникальных классов после очистки: "
+                f"`{preprocessing_summary.unique_classes}`;",
+                f"- средняя длина текста после очистки, символов: "
+                f"`{preprocessing_summary.text_length_chars.mean}`;",
+                f"- отчет сохранен в `{preprocessing_result.report_path}`.",
+            ]
+        )
+    )
+
+    st.write("Первые 10 строк очищенного датасета:")
+    st.dataframe(preprocessing_result.dataframe.head(10), use_container_width=True)
+
+
+def _reset_preprocessing_state() -> None:
+    """Сбрасывает результат предобработки при смене загруженного датасета."""
+    import streamlit as st
+
+    st.session_state.preprocessing_result = None
+    st.session_state.preprocessing_dataset_key = None
+
+
+def _render_preprocessing_section(dataset_result: DatasetLoadResult) -> None:
+    """Отрисовывает блок запуска предобработки для уже загруженного датасета."""
+    import streamlit as st
+
+    current_dataset_key = str(dataset_result.saved_path)
+    if "preprocessing_result" not in st.session_state:
+        st.session_state.preprocessing_result = None
+    if "preprocessing_dataset_key" not in st.session_state:
+        st.session_state.preprocessing_dataset_key = None
+
+    if st.session_state.preprocessing_dataset_key != current_dataset_key:
+        st.session_state.preprocessing_result = None
+        st.session_state.preprocessing_dataset_key = current_dataset_key
+
+    st.subheader("Предобработка текста")
+    st.caption(
+        "На этом этапе выполняются перевод текста в нижний регистр, нормализация "
+        "пробелов и базовой пунктуации, а также удаление дубликатов по паре "
+        "`text + label`."
+    )
+
+    if st.button(
+        "Очистить текст и сохранить подготовленный датасет",
+        use_container_width=True,
+    ):
+        try:
+            st.session_state.preprocessing_result = preprocess_dataset(
+                dataset_result.dataframe,
+                source_dataset_path=dataset_result.saved_path,
+            )
+            st.session_state.preprocessing_dataset_key = current_dataset_key
+        except TextPreprocessingError as error:
+            st.session_state.preprocessing_result = None
+            st.error(str(error))
+
+    preprocessing_result = st.session_state.preprocessing_result
+    if preprocessing_result is None:
+        st.info(
+            "После запуска предобработки здесь появятся сведения об очистке текста, "
+            "удаленных дубликатах и путь к сохраненному CSV."
+        )
+        return
+
+    _render_preprocessing_preview(preprocessing_result)
 
 
 def _render_dataset_preview(dataset_result: DatasetLoadResult) -> None:
@@ -134,9 +236,11 @@ def _render_dataset_loading_section() -> None:
                         source_name=uploaded_file.name,
                     )
                     st.session_state.loaded_local_file_key = uploaded_file_key
+                    _reset_preprocessing_state()
                 except DatasetValidationError as error:
                     st.session_state.dataset_result = None
                     st.session_state.loaded_local_file_key = None
+                    _reset_preprocessing_state()
                     st.error(str(error))
         else:
             st.session_state.loaded_local_file_key = None
@@ -154,8 +258,10 @@ def _render_dataset_loading_section() -> None:
                 try:
                     st.session_state.dataset_result = load_dataset_from_url(dataset_url)
                     st.session_state.loaded_local_file_key = None
+                    _reset_preprocessing_state()
                 except DatasetValidationError as error:
                     st.session_state.dataset_result = None
+                    _reset_preprocessing_state()
                     st.error(str(error))
 
     dataset_result = st.session_state.dataset_result
@@ -167,6 +273,7 @@ def _render_dataset_loading_section() -> None:
         return
 
     _render_dataset_preview(dataset_result)
+    _render_preprocessing_section(dataset_result)
 
 
 def render_main_page() -> None:
@@ -215,10 +322,12 @@ def render_main_page() -> None:
                 f"Каталог документации: {PROJECT_PATHS.docs_dir}",
                 f"Каталог данных: {PROJECT_PATHS.data_dir}",
                 f"Каталог исходных датасетов: {PROJECT_PATHS.raw_data_dir}",
+                f"Каталог очищенных датасетов: {PROJECT_PATHS.processed_data_dir}",
                 f"Каталог моделей: {PROJECT_PATHS.models_dir}",
                 f"Каталог ноутбуков: {PROJECT_PATHS.notebooks_dir}",
                 f"Каталог отчетов: {PROJECT_PATHS.reports_dir}",
                 f"Каталог JSON-сводок: {PROJECT_PATHS.dataset_reports_dir}",
+                f"Каталог отчетов предобработки: {PROJECT_PATHS.preprocessing_reports_dir}",
             ]
         ),
         language="text",
