@@ -48,6 +48,11 @@ from src.isnews.model_comparison import (
     ModelComparisonResult,
     compare_trained_models,
 )
+from src.isnews.prediction_confidence_analysis import (
+    PredictionConfidenceAnalysisError,
+    PredictionConfidenceAnalysisResult,
+    analyze_prediction_confidence,
+)
 from src.isnews.saved_artifacts_loading import (
     SavedArtifactsLoadingError,
     SavedArtifactsLoadingResult,
@@ -486,6 +491,45 @@ def _render_batch_inference_evaluation_preview(
     st.dataframe(evaluation_result.confusion_matrix_dataframe, use_container_width=True)
 
 
+def _render_prediction_confidence_preview(
+    confidence_result: PredictionConfidenceAnalysisResult,
+) -> None:
+    """Показывает top-N самых уверенных и самых неуверенных предсказаний модели."""
+    import streamlit as st
+
+    confidence_report = confidence_result.report
+
+    st.success("Анализ уверенности предсказаний успешно сформирован.")
+
+    metric_column_1, metric_column_2, metric_column_3, metric_column_4 = st.columns(4)
+    metric_column_1.metric("Проанализировано строк", confidence_report.analyzed_rows)
+    metric_column_2.metric("Top N", confidence_report.top_n)
+    metric_column_3.metric("Макс. вероятность", confidence_report.highest_probability)
+    metric_column_4.metric("Мин. вероятность", confidence_report.lowest_probability)
+
+    for warning_message in confidence_report.warning_messages:
+        st.warning(warning_message)
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- источник предсказаний: `{confidence_report.source_name}`;",
+                f"- CSV уверенных предсказаний: `{confidence_result.paths.confident_predictions_path}`;",
+                f"- CSV неуверенных предсказаний: `{confidence_result.paths.uncertain_predictions_path}`;",
+                f"- JSON-отчет: `{confidence_result.paths.report_path}`.",
+            ]
+        )
+    )
+
+    confident_column, uncertain_column = st.columns(2)
+    with confident_column:
+        st.write("Самые уверенные предсказания:")
+        st.dataframe(confidence_result.confident_dataframe, use_container_width=True)
+    with uncertain_column:
+        st.write("Самые неуверенные предсказания:")
+        st.dataframe(confidence_result.uncertain_dataframe, use_container_width=True)
+
+
 def _render_experiment_registry_preview(
     registry_result: ExperimentRegistryResult,
 ) -> None:
@@ -756,7 +800,16 @@ def _reset_batch_inference_state() -> None:
 
     st.session_state.batch_inference_result = None
     st.session_state.batch_inference_request_key = None
+    _reset_prediction_confidence_state()
     _reset_batch_inference_evaluation_state()
+
+
+def _reset_prediction_confidence_state() -> None:
+    """Сбрасывает анализ уверенности при смене результатов пакетного инференса."""
+    import streamlit as st
+
+    st.session_state.batch_confidence_analysis_result = None
+    st.session_state.batch_confidence_analysis_source_key = None
 
 
 def _reset_batch_inference_evaluation_state() -> None:
@@ -1275,7 +1328,66 @@ def _render_batch_inference_section() -> None:
         return
 
     _render_batch_inference_preview(batch_inference_result)
+    _render_prediction_confidence_section(batch_inference_result)
     _render_batch_inference_evaluation_section(batch_inference_result)
+
+
+def _render_prediction_confidence_section(
+    batch_inference_result: BatchTextInferenceResult,
+) -> None:
+    """Отрисовывает блок анализа самых уверенных и неуверенных пакетных предсказаний."""
+    import streamlit as st
+
+    current_source_key = str(batch_inference_result.paths.predictions_path)
+    if "batch_confidence_analysis_result" not in st.session_state:
+        st.session_state.batch_confidence_analysis_result = None
+    if "batch_confidence_analysis_source_key" not in st.session_state:
+        st.session_state.batch_confidence_analysis_source_key = None
+
+    if st.session_state.batch_confidence_analysis_source_key != current_source_key:
+        st.session_state.batch_confidence_analysis_result = None
+        st.session_state.batch_confidence_analysis_source_key = current_source_key
+
+    st.subheader("Анализ уверенности предсказаний")
+    st.caption(
+        "На этом этапе можно сохранить top-N самых уверенных и самых неуверенных "
+        "предсказаний модели для последующего анализа качества."
+    )
+
+    top_n = st.number_input(
+        "Сколько строк сохранить в каждой группе",
+        min_value=1,
+        max_value=100,
+        value=10,
+        step=1,
+        key="batch_confidence_top_n",
+    )
+
+    if st.button(
+        "Сформировать анализ уверенности",
+        use_container_width=True,
+    ):
+        try:
+            _reset_prediction_confidence_state()
+            st.session_state.batch_confidence_analysis_result = analyze_prediction_confidence(
+                batch_inference_result,
+                top_n=int(top_n),
+            )
+            st.session_state.batch_confidence_analysis_source_key = current_source_key
+        except PredictionConfidenceAnalysisError as error:
+            st.session_state.batch_confidence_analysis_result = None
+            st.session_state.batch_confidence_analysis_source_key = current_source_key
+            st.error(str(error))
+
+    confidence_result = st.session_state.batch_confidence_analysis_result
+    if confidence_result is None:
+        st.info(
+            "После запуска здесь появятся две таблицы: самые уверенные и самые "
+            "неуверенные предсказания модели."
+        )
+        return
+
+    _render_prediction_confidence_preview(confidence_result)
 
 
 def _render_batch_inference_evaluation_section(
@@ -1716,6 +1828,7 @@ def render_main_page() -> None:
                 f"Каталог отчетов по инференсу: {PROJECT_PATHS.inference_reports_dir}",
                 f"Каталог сводных реестров экспериментов: {PROJECT_PATHS.experiment_reports_dir}",
                 f"Каталог сравнений моделей: {PROJECT_PATHS.comparison_reports_dir}",
+                f"Каталог анализа уверенности предсказаний: {PROJECT_PATHS.confidence_reports_dir}",
             ]
         ),
         language="text",

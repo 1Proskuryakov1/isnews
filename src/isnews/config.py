@@ -34,6 +34,7 @@ class ProjectPaths:
     inference_reports_dir: Path
     experiment_reports_dir: Path
     comparison_reports_dir: Path
+    confidence_reports_dir: Path
 
     @classmethod
     def from_root(cls, root: Path | None = None) -> "ProjectPaths":
@@ -64,6 +65,7 @@ class ProjectPaths:
             inference_reports_dir=resolved_root / "reports" / "inference",
             experiment_reports_dir=resolved_root / "reports" / "experiments",
             comparison_reports_dir=resolved_root / "reports" / "comparisons",
+            confidence_reports_dir=resolved_root / "reports" / "confidence",
         )
 
     @property
@@ -92,6 +94,7 @@ class ProjectPaths:
             self.inference_reports_dir,
             self.experiment_reports_dir,
             self.comparison_reports_dir,
+            self.confidence_reports_dir,
         )
 
     def ensure_directories(self) -> None:
