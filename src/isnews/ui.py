@@ -132,6 +132,46 @@ from src.isnews.transformers_batch_inference_evaluation import (
     TransformersBatchInferenceEvaluationResult,
     evaluate_transformers_batch_inference,
 )
+from src.isnews.transformers_confusion_heatmap_export import (
+    TransformersConfusionHeatmapExportError,
+    TransformersConfusionHeatmapExportResult,
+    export_transformers_confusion_heatmaps,
+)
+from src.isnews.transformers_docx_report_export import (
+    TransformersDocxReportExportError,
+    TransformersDocxReportExportResult,
+    export_transformers_docx_report,
+)
+from src.isnews.transformers_experiment_registry import (
+    TransformersExperimentRegistryError,
+    TransformersExperimentRegistryResult,
+    export_transformers_experiment_registry,
+)
+from src.isnews.transformers_html_report_export import (
+    TransformersHtmlReportExportError,
+    TransformersHtmlReportExportResult,
+    export_transformers_html_report,
+)
+from src.isnews.transformers_markdown_report_export import (
+    TransformersMarkdownReportExportError,
+    TransformersMarkdownReportExportResult,
+    export_transformers_markdown_report,
+)
+from src.isnews.transformers_model_comparison import (
+    TransformersModelComparisonError,
+    TransformersModelComparisonResult,
+    compare_transformers_runs,
+)
+from src.isnews.transformers_plot_export import (
+    TransformersPlotExportError,
+    TransformersPlotExportResult,
+    export_transformers_plots,
+)
+from src.isnews.transformers_thesis_tables_export import (
+    TransformersThesisTablesExportError,
+    TransformersThesisTablesExportResult,
+    export_transformers_thesis_tables,
+)
 from src.isnews.text_preprocessing import TextPreprocessingError, TextPreprocessingResult
 from src.isnews.text_preprocessing import preprocess_dataset
 from src.isnews.tfidf_vectorization import (
@@ -683,24 +723,41 @@ def _render_batch_error_analysis_preview(
 
 
 def _render_experiment_registry_preview(
-    registry_result: ExperimentRegistryResult,
+    registry_result: ExperimentRegistryResult | TransformersExperimentRegistryResult,
 ) -> None:
     """Показывает сводную таблицу по найденным экспериментам и пути к экспортам."""
     import streamlit as st
 
     registry_dataframe = registry_result.dataframe
+    registry_type = "transformers" if isinstance(
+        registry_result, TransformersExperimentRegistryResult
+    ) else "sklearn"
+    training_runs = int(
+        (
+            registry_dataframe.get("record_type", pd.Series(dtype="string")).isin(
+                ["training_run", "transformers_batch_inference"]
+            )
+        ).sum()
+    )
+    evaluation_runs = int(
+        (
+            registry_dataframe.get("record_type", pd.Series(dtype="string")).isin(
+                ["batch_evaluation", "transformers_batch_evaluation"]
+            )
+        ).sum()
+    )
 
     st.success("Сводный реестр экспериментов успешно сформирован.")
 
     metric_column_1, metric_column_2, metric_column_3 = st.columns(3)
     metric_column_1.metric("Всего записей", len(registry_dataframe))
     metric_column_2.metric(
-        "Запусков обучения",
-        int((registry_dataframe.get("record_type", pd.Series(dtype="string")) == "training_run").sum()),
+        "Запусков инференса" if registry_type == "transformers" else "Запусков обучения",
+        training_runs,
     )
     metric_column_3.metric(
         "Пакетных оценок",
-        int((registry_dataframe.get("record_type", pd.Series(dtype="string")) == "batch_evaluation").sum()),
+        evaluation_runs,
     )
 
     st.markdown(
@@ -722,7 +779,9 @@ def _render_experiment_registry_preview(
     st.dataframe(registry_dataframe.head(20), use_container_width=True)
 
 
-def _render_html_report_preview(html_report_result: HtmlReportExportResult) -> None:
+def _render_html_report_preview(
+    html_report_result: HtmlReportExportResult | TransformersHtmlReportExportResult,
+) -> None:
     """Показывает сведения о сформированном HTML-отчете."""
     import streamlit as st
 
@@ -737,7 +796,9 @@ def _render_html_report_preview(html_report_result: HtmlReportExportResult) -> N
     )
 
 
-def _render_docx_report_preview(docx_report_result: DocxReportExportResult) -> None:
+def _render_docx_report_preview(
+    docx_report_result: DocxReportExportResult | TransformersDocxReportExportResult,
+) -> None:
     """Показывает сведения о сформированном DOCX-отчете."""
     import streamlit as st
 
@@ -753,7 +814,9 @@ def _render_docx_report_preview(docx_report_result: DocxReportExportResult) -> N
 
 
 def _render_markdown_report_preview(
-    markdown_report_result: MarkdownReportExportResult,
+    markdown_report_result: (
+        MarkdownReportExportResult | TransformersMarkdownReportExportResult
+    ),
 ) -> None:
     """Показывает сведения о сформированном Markdown-отчете."""
     import streamlit as st
@@ -770,7 +833,7 @@ def _render_markdown_report_preview(
 
 
 def _render_thesis_tables_preview(
-    thesis_tables_result: ThesisTablesExportResult,
+    thesis_tables_result: ThesisTablesExportResult | TransformersThesisTablesExportResult,
 ) -> None:
     """Показывает сведения о выгруженных CSV-таблицах для ВКР."""
     import streamlit as st
@@ -789,7 +852,9 @@ def _render_thesis_tables_preview(
     st.markdown("\n".join(rows))
 
 
-def _render_plot_export_preview(plot_export_result: PlotExportResult) -> None:
+def _render_plot_export_preview(
+    plot_export_result: PlotExportResult | TransformersPlotExportResult,
+) -> None:
     """Показывает сведения о выгруженных PNG-графиках."""
     import streamlit as st
 
@@ -798,15 +863,20 @@ def _render_plot_export_preview(plot_export_result: PlotExportResult) -> None:
         f"- выгруженные графики: `{', '.join(plot_export_result.exported_plot_names)}`;",
         f"- manifest: `{plot_export_result.paths.manifest_path}`;",
     ]
-    if plot_export_result.paths.metrics_plot_path is not None:
-        rows.append(f"- график метрик: `{plot_export_result.paths.metrics_plot_path}`;")
+    metrics_plot_path = getattr(
+        plot_export_result.paths,
+        "metrics_plot_path",
+        getattr(plot_export_result.paths, "evaluation_plot_path", None),
+    )
+    if metrics_plot_path is not None:
+        rows.append(f"- график метрик: `{metrics_plot_path}`;")
     if plot_export_result.paths.comparison_plot_path is not None:
         rows.append(f"- график сравнения моделей: `{plot_export_result.paths.comparison_plot_path}`;")
     st.markdown("\n".join(rows))
 
 
 def _render_confusion_heatmap_preview(
-    heatmap_result: ConfusionHeatmapExportResult,
+    heatmap_result: ConfusionHeatmapExportResult | TransformersConfusionHeatmapExportResult,
 ) -> None:
     """Показывает сведения о выгруженных тепловых картах матриц ошибок."""
     import streamlit as st
@@ -816,22 +886,42 @@ def _render_confusion_heatmap_preview(
         f"- выгруженные тепловые карты: `{', '.join(heatmap_result.exported_heatmap_names)}`;",
         f"- manifest: `{heatmap_result.paths.manifest_path}`;",
     ]
-    if heatmap_result.paths.validation_heatmap_path is not None:
-        rows.append(f"- validation heatmap: `{heatmap_result.paths.validation_heatmap_path}`;")
-    if heatmap_result.paths.test_heatmap_path is not None:
-        rows.append(f"- test heatmap: `{heatmap_result.paths.test_heatmap_path}`;")
+    validation_heatmap_path = getattr(
+        heatmap_result.paths,
+        "validation_heatmap_path",
+        None,
+    )
+    test_heatmap_path = getattr(
+        heatmap_result.paths,
+        "test_heatmap_path",
+        None,
+    )
+    if validation_heatmap_path is not None:
+        rows.append(f"- validation heatmap: `{validation_heatmap_path}`;")
+    if test_heatmap_path is not None:
+        rows.append(f"- test heatmap: `{test_heatmap_path}`;")
     if heatmap_result.paths.batch_heatmap_path is not None:
         rows.append(f"- batch heatmap: `{heatmap_result.paths.batch_heatmap_path}`;")
     st.markdown("\n".join(rows))
 
 
 def _render_model_comparison_preview(
-    comparison_result: ModelComparisonResult,
+    comparison_result: ModelComparisonResult | TransformersModelComparisonResult,
 ) -> None:
     """Показывает сводную таблицу сравнения обученных моделей."""
     import streamlit as st
 
     comparison_dataframe = comparison_result.dataframe
+    best_model_name = getattr(
+        comparison_result,
+        "best_model_name",
+        getattr(comparison_result, "best_source_name", None),
+    )
+    best_metric_name = (
+        "accuracy"
+        if "accuracy" in comparison_dataframe.columns
+        else "validation_accuracy"
+    )
 
     st.success("Сравнение обученных моделей успешно сформировано.")
 
@@ -839,11 +929,11 @@ def _render_model_comparison_preview(
     metric_column_1.metric("Моделей в таблице", len(comparison_dataframe))
     metric_column_2.metric(
         "Лучшая модель",
-        comparison_result.best_model_name or "нет данных",
+        best_model_name or "нет данных",
     )
     metric_column_3.metric(
-        "Лучший Validation Accuracy",
-        comparison_dataframe.iloc[0]["validation_accuracy"] if not comparison_dataframe.empty else "нет данных",
+        "Лучший Accuracy" if best_metric_name == "accuracy" else "Лучший Validation Accuracy",
+        comparison_dataframe.iloc[0][best_metric_name] if not comparison_dataframe.empty else "нет данных",
     )
 
     st.markdown(
@@ -1923,11 +2013,20 @@ def _render_experiment_registry_section() -> None:
 
     if "experiment_registry_result" not in st.session_state:
         st.session_state.experiment_registry_result = None
+    if "transformers_experiment_registry_result" not in st.session_state:
+        st.session_state.transformers_experiment_registry_result = None
 
     st.subheader("Сводка экспериментов")
+    registry_mode = st.radio(
+        "Тип реестра",
+        options=["sklearn", "transformers"],
+        format_func=lambda value: "Классические модели" if value == "sklearn" else "Transformers",
+        horizontal=True,
+        key="experiment_registry_mode",
+    )
     st.caption(
-        "На этом этапе можно собрать единый CSV/JSON-реестр по найденным запускам обучения, "
-        "оценки модели и пакетного тестирования на размеченных CSV."
+        "На этом этапе можно собрать единый CSV/JSON-реестр по найденным запускам "
+        "классических моделей или experiments на базе transformers."
     )
 
     if st.button(
@@ -1935,12 +2034,24 @@ def _render_experiment_registry_section() -> None:
         use_container_width=True,
     ):
         try:
-            st.session_state.experiment_registry_result = export_experiment_registry()
-        except ExperimentRegistryError as error:
-            st.session_state.experiment_registry_result = None
+            if registry_mode == "transformers":
+                st.session_state.transformers_experiment_registry_result = (
+                    export_transformers_experiment_registry()
+                )
+            else:
+                st.session_state.experiment_registry_result = export_experiment_registry()
+        except (ExperimentRegistryError, TransformersExperimentRegistryError) as error:
+            if registry_mode == "transformers":
+                st.session_state.transformers_experiment_registry_result = None
+            else:
+                st.session_state.experiment_registry_result = None
             st.error(str(error))
 
-    registry_result = st.session_state.experiment_registry_result
+    registry_result = (
+        st.session_state.transformers_experiment_registry_result
+        if registry_mode == "transformers"
+        else st.session_state.experiment_registry_result
+    )
     if registry_result is None:
         st.info(
             "После запуска здесь появится единая таблица по экспериментам, а также пути к экспортированным CSV и JSON."
@@ -1956,11 +2067,20 @@ def _render_model_comparison_section() -> None:
 
     if "model_comparison_result" not in st.session_state:
         st.session_state.model_comparison_result = None
+    if "transformers_model_comparison_result" not in st.session_state:
+        st.session_state.transformers_model_comparison_result = None
 
     st.subheader("Сравнение моделей")
+    comparison_mode = st.radio(
+        "Тип сравнения",
+        options=["sklearn", "transformers"],
+        format_func=lambda value: "Классические модели" if value == "sklearn" else "Transformers",
+        horizontal=True,
+        key="model_comparison_mode",
+    )
     st.caption(
-        "На этом этапе можно построить единую таблицу сравнения по всем найденным обученным "
-        "моделям и выбрать лучший запуск по `validation accuracy`."
+        "На этом этапе можно построить единую таблицу сравнения по классическим моделям "
+        "или по найденным transformers-запускам."
     )
 
     if st.button(
@@ -1968,12 +2088,24 @@ def _render_model_comparison_section() -> None:
         use_container_width=True,
     ):
         try:
-            st.session_state.model_comparison_result = compare_trained_models()
-        except ModelComparisonError as error:
-            st.session_state.model_comparison_result = None
+            if comparison_mode == "transformers":
+                st.session_state.transformers_model_comparison_result = (
+                    compare_transformers_runs()
+                )
+            else:
+                st.session_state.model_comparison_result = compare_trained_models()
+        except (ModelComparisonError, TransformersModelComparisonError) as error:
+            if comparison_mode == "transformers":
+                st.session_state.transformers_model_comparison_result = None
+            else:
+                st.session_state.model_comparison_result = None
             st.error(str(error))
 
-    comparison_result = st.session_state.model_comparison_result
+    comparison_result = (
+        st.session_state.transformers_model_comparison_result
+        if comparison_mode == "transformers"
+        else st.session_state.model_comparison_result
+    )
     if comparison_result is None:
         st.info(
             "После запуска здесь появится таблица сравнения всех обученных моделей и пути к CSV/JSON-сводке."
@@ -1989,11 +2121,19 @@ def _render_html_report_section() -> None:
 
     if "html_report_result" not in st.session_state:
         st.session_state.html_report_result = None
+    if "transformers_html_report_result" not in st.session_state:
+        st.session_state.transformers_html_report_result = None
 
     st.subheader("HTML-отчет")
+    report_mode = st.radio(
+        "Тип HTML-отчета",
+        options=["sklearn", "transformers"],
+        format_func=lambda value: "Классические модели" if value == "sklearn" else "Transformers",
+        horizontal=True,
+        key="html_report_mode",
+    )
     st.caption(
-        "На этом этапе можно собрать краткий HTML-отчет по текущей сессии: "
-        "обучение модели, метрики, сравнение запусков, реестр экспериментов и анализ ошибок."
+        "На этом этапе можно собрать HTML-отчет по классической ветке или по transformers-экспериментам."
     )
 
     if st.button(
@@ -2001,18 +2141,43 @@ def _render_html_report_section() -> None:
         use_container_width=True,
     ):
         try:
-            st.session_state.html_report_result = export_session_html_report(
-                training_result=st.session_state.get("training_result"),
-                evaluation_result=st.session_state.get("evaluation_result"),
-                comparison_result=st.session_state.get("model_comparison_result"),
-                registry_result=st.session_state.get("experiment_registry_result"),
-                error_analysis_result=st.session_state.get("batch_error_analysis_result"),
-            )
-        except HtmlReportExportError as error:
-            st.session_state.html_report_result = None
+            if report_mode == "transformers":
+                st.session_state.transformers_html_report_result = export_transformers_html_report(
+                    comparison_result=st.session_state.get("transformers_model_comparison_result"),
+                    registry_result=st.session_state.get("transformers_experiment_registry_result"),
+                    evaluation_result=st.session_state.get("batch_inference_evaluation_result")
+                    if isinstance(
+                        st.session_state.get("batch_inference_evaluation_result"),
+                        TransformersBatchInferenceEvaluationResult,
+                    )
+                    else None,
+                    error_analysis_result=st.session_state.get("batch_error_analysis_result")
+                    if isinstance(
+                        st.session_state.get("batch_error_analysis_result"),
+                        TransformersBatchErrorAnalysisResult,
+                    )
+                    else None,
+                )
+            else:
+                st.session_state.html_report_result = export_session_html_report(
+                    training_result=st.session_state.get("training_result"),
+                    evaluation_result=st.session_state.get("evaluation_result"),
+                    comparison_result=st.session_state.get("model_comparison_result"),
+                    registry_result=st.session_state.get("experiment_registry_result"),
+                    error_analysis_result=st.session_state.get("batch_error_analysis_result"),
+                )
+        except (HtmlReportExportError, TransformersHtmlReportExportError) as error:
+            if report_mode == "transformers":
+                st.session_state.transformers_html_report_result = None
+            else:
+                st.session_state.html_report_result = None
             st.error(str(error))
 
-    html_report_result = st.session_state.html_report_result
+    html_report_result = (
+        st.session_state.transformers_html_report_result
+        if report_mode == "transformers"
+        else st.session_state.html_report_result
+    )
     if html_report_result is None:
         st.info(
             "После запуска здесь появится путь к HTML-файлу со сводкой по текущим результатам."
@@ -2028,11 +2193,19 @@ def _render_docx_report_section() -> None:
 
     if "docx_report_result" not in st.session_state:
         st.session_state.docx_report_result = None
+    if "transformers_docx_report_result" not in st.session_state:
+        st.session_state.transformers_docx_report_result = None
 
     st.subheader("DOCX-отчет")
+    report_mode = st.radio(
+        "Тип DOCX-отчета",
+        options=["sklearn", "transformers"],
+        format_func=lambda value: "Классические модели" if value == "sklearn" else "Transformers",
+        horizontal=True,
+        key="docx_report_mode",
+    )
     st.caption(
-        "На этом этапе можно собрать DOCX-отчет по текущей сессии: "
-        "обучение модели, метрики, сравнение запусков, реестр экспериментов и анализ ошибок."
+        "На этом этапе можно собрать DOCX-отчет по классической ветке или по transformers-экспериментам."
     )
 
     if st.button(
@@ -2040,18 +2213,43 @@ def _render_docx_report_section() -> None:
         use_container_width=True,
     ):
         try:
-            st.session_state.docx_report_result = export_session_docx_report(
-                training_result=st.session_state.get("training_result"),
-                evaluation_result=st.session_state.get("evaluation_result"),
-                comparison_result=st.session_state.get("model_comparison_result"),
-                registry_result=st.session_state.get("experiment_registry_result"),
-                error_analysis_result=st.session_state.get("batch_error_analysis_result"),
-            )
-        except DocxReportExportError as error:
-            st.session_state.docx_report_result = None
+            if report_mode == "transformers":
+                st.session_state.transformers_docx_report_result = export_transformers_docx_report(
+                    comparison_result=st.session_state.get("transformers_model_comparison_result"),
+                    registry_result=st.session_state.get("transformers_experiment_registry_result"),
+                    evaluation_result=st.session_state.get("batch_inference_evaluation_result")
+                    if isinstance(
+                        st.session_state.get("batch_inference_evaluation_result"),
+                        TransformersBatchInferenceEvaluationResult,
+                    )
+                    else None,
+                    error_analysis_result=st.session_state.get("batch_error_analysis_result")
+                    if isinstance(
+                        st.session_state.get("batch_error_analysis_result"),
+                        TransformersBatchErrorAnalysisResult,
+                    )
+                    else None,
+                )
+            else:
+                st.session_state.docx_report_result = export_session_docx_report(
+                    training_result=st.session_state.get("training_result"),
+                    evaluation_result=st.session_state.get("evaluation_result"),
+                    comparison_result=st.session_state.get("model_comparison_result"),
+                    registry_result=st.session_state.get("experiment_registry_result"),
+                    error_analysis_result=st.session_state.get("batch_error_analysis_result"),
+                )
+        except (DocxReportExportError, TransformersDocxReportExportError) as error:
+            if report_mode == "transformers":
+                st.session_state.transformers_docx_report_result = None
+            else:
+                st.session_state.docx_report_result = None
             st.error(str(error))
 
-    docx_report_result = st.session_state.docx_report_result
+    docx_report_result = (
+        st.session_state.transformers_docx_report_result
+        if report_mode == "transformers"
+        else st.session_state.docx_report_result
+    )
     if docx_report_result is None:
         st.info(
             "После запуска здесь появится путь к DOCX-файлу со сводкой по текущим результатам."
@@ -2067,11 +2265,19 @@ def _render_markdown_report_section() -> None:
 
     if "markdown_report_result" not in st.session_state:
         st.session_state.markdown_report_result = None
+    if "transformers_markdown_report_result" not in st.session_state:
+        st.session_state.transformers_markdown_report_result = None
 
     st.subheader("Markdown-отчет")
+    report_mode = st.radio(
+        "Тип Markdown-отчета",
+        options=["sklearn", "transformers"],
+        format_func=lambda value: "Классические модели" if value == "sklearn" else "Transformers",
+        horizontal=True,
+        key="markdown_report_mode",
+    )
     st.caption(
-        "На этом этапе можно собрать Markdown-отчет с таблицами и короткими "
-        "текстовыми фрагментами для вставки в пояснительную записку ВКР."
+        "На этом этапе можно собрать Markdown-отчет с таблицами для классической ветки или для transformers."
     )
 
     if st.button(
@@ -2079,18 +2285,46 @@ def _render_markdown_report_section() -> None:
         use_container_width=True,
     ):
         try:
-            st.session_state.markdown_report_result = export_session_markdown_report(
-                training_result=st.session_state.get("training_result"),
-                evaluation_result=st.session_state.get("evaluation_result"),
-                comparison_result=st.session_state.get("model_comparison_result"),
-                registry_result=st.session_state.get("experiment_registry_result"),
-                error_analysis_result=st.session_state.get("batch_error_analysis_result"),
-            )
-        except MarkdownReportExportError as error:
-            st.session_state.markdown_report_result = None
+            if report_mode == "transformers":
+                st.session_state.transformers_markdown_report_result = export_transformers_markdown_report(
+                    comparison_result=st.session_state.get("transformers_model_comparison_result"),
+                    registry_result=st.session_state.get("transformers_experiment_registry_result"),
+                    evaluation_result=st.session_state.get("batch_inference_evaluation_result")
+                    if isinstance(
+                        st.session_state.get("batch_inference_evaluation_result"),
+                        TransformersBatchInferenceEvaluationResult,
+                    )
+                    else None,
+                    error_analysis_result=st.session_state.get("batch_error_analysis_result")
+                    if isinstance(
+                        st.session_state.get("batch_error_analysis_result"),
+                        TransformersBatchErrorAnalysisResult,
+                    )
+                    else None,
+                )
+            else:
+                st.session_state.markdown_report_result = export_session_markdown_report(
+                    training_result=st.session_state.get("training_result"),
+                    evaluation_result=st.session_state.get("evaluation_result"),
+                    comparison_result=st.session_state.get("model_comparison_result"),
+                    registry_result=st.session_state.get("experiment_registry_result"),
+                    error_analysis_result=st.session_state.get("batch_error_analysis_result"),
+                )
+        except (
+            MarkdownReportExportError,
+            TransformersMarkdownReportExportError,
+        ) as error:
+            if report_mode == "transformers":
+                st.session_state.transformers_markdown_report_result = None
+            else:
+                st.session_state.markdown_report_result = None
             st.error(str(error))
 
-    markdown_report_result = st.session_state.markdown_report_result
+    markdown_report_result = (
+        st.session_state.transformers_markdown_report_result
+        if report_mode == "transformers"
+        else st.session_state.markdown_report_result
+    )
     if markdown_report_result is None:
         st.info(
             "После запуска здесь появится путь к Markdown-файлу со сводкой по текущим результатам."
@@ -2106,11 +2340,19 @@ def _render_thesis_tables_section() -> None:
 
     if "thesis_tables_result" not in st.session_state:
         st.session_state.thesis_tables_result = None
+    if "transformers_thesis_tables_result" not in st.session_state:
+        st.session_state.transformers_thesis_tables_result = None
 
     st.subheader("Таблицы для ВКР")
+    tables_mode = st.radio(
+        "Тип таблиц",
+        options=["sklearn", "transformers"],
+        format_func=lambda value: "Классические модели" if value == "sklearn" else "Transformers",
+        horizontal=True,
+        key="thesis_tables_mode",
+    )
     st.caption(
-        "На этом этапе можно отдельно выгрузить CSV-таблицы по метрикам, "
-        "сравнению моделей и анализу ошибок для вставки в текст ВКР."
+        "На этом этапе можно отдельно выгрузить CSV-таблицы для классических моделей или для transformers-экспериментов."
     )
 
     if st.button(
@@ -2118,16 +2360,43 @@ def _render_thesis_tables_section() -> None:
         use_container_width=True,
     ):
         try:
-            st.session_state.thesis_tables_result = export_thesis_tables(
-                evaluation_result=st.session_state.get("evaluation_result"),
-                comparison_result=st.session_state.get("model_comparison_result"),
-                error_analysis_result=st.session_state.get("batch_error_analysis_result"),
-            )
-        except ThesisTablesExportError as error:
-            st.session_state.thesis_tables_result = None
+            if tables_mode == "transformers":
+                st.session_state.transformers_thesis_tables_result = export_transformers_thesis_tables(
+                    evaluation_result=st.session_state.get("batch_inference_evaluation_result")
+                    if isinstance(
+                        st.session_state.get("batch_inference_evaluation_result"),
+                        TransformersBatchInferenceEvaluationResult,
+                    )
+                    else None,
+                    comparison_result=st.session_state.get("transformers_model_comparison_result"),
+                    error_analysis_result=st.session_state.get("batch_error_analysis_result")
+                    if isinstance(
+                        st.session_state.get("batch_error_analysis_result"),
+                        TransformersBatchErrorAnalysisResult,
+                    )
+                    else None,
+                )
+            else:
+                st.session_state.thesis_tables_result = export_thesis_tables(
+                    evaluation_result=st.session_state.get("evaluation_result"),
+                    comparison_result=st.session_state.get("model_comparison_result"),
+                    error_analysis_result=st.session_state.get("batch_error_analysis_result"),
+                )
+        except (
+            ThesisTablesExportError,
+            TransformersThesisTablesExportError,
+        ) as error:
+            if tables_mode == "transformers":
+                st.session_state.transformers_thesis_tables_result = None
+            else:
+                st.session_state.thesis_tables_result = None
             st.error(str(error))
 
-    thesis_tables_result = st.session_state.thesis_tables_result
+    thesis_tables_result = (
+        st.session_state.transformers_thesis_tables_result
+        if tables_mode == "transformers"
+        else st.session_state.thesis_tables_result
+    )
     if thesis_tables_result is None:
         st.info(
             "После запуска здесь появятся пути к отдельным CSV-таблицам по текущим результатам."
@@ -2143,11 +2412,19 @@ def _render_plot_export_section() -> None:
 
     if "plot_export_result" not in st.session_state:
         st.session_state.plot_export_result = None
+    if "transformers_plot_export_result" not in st.session_state:
+        st.session_state.transformers_plot_export_result = None
 
     st.subheader("PNG-графики")
+    plot_mode = st.radio(
+        "Тип графиков",
+        options=["sklearn", "transformers"],
+        format_func=lambda value: "Классические модели" if value == "sklearn" else "Transformers",
+        horizontal=True,
+        key="plot_export_mode",
+    )
     st.caption(
-        "На этом этапе можно выгрузить PNG-графики по метрикам качества модели "
-        "и сравнению нескольких обученных моделей."
+        "На этом этапе можно выгрузить PNG-графики для классических моделей или для transformers-экспериментов."
     )
 
     if st.button(
@@ -2155,15 +2432,33 @@ def _render_plot_export_section() -> None:
         use_container_width=True,
     ):
         try:
-            st.session_state.plot_export_result = export_plots(
-                evaluation_result=st.session_state.get("evaluation_result"),
-                comparison_result=st.session_state.get("model_comparison_result"),
-            )
-        except PlotExportError as error:
-            st.session_state.plot_export_result = None
+            if plot_mode == "transformers":
+                st.session_state.transformers_plot_export_result = export_transformers_plots(
+                    evaluation_result=st.session_state.get("batch_inference_evaluation_result")
+                    if isinstance(
+                        st.session_state.get("batch_inference_evaluation_result"),
+                        TransformersBatchInferenceEvaluationResult,
+                    )
+                    else None,
+                    comparison_result=st.session_state.get("transformers_model_comparison_result"),
+                )
+            else:
+                st.session_state.plot_export_result = export_plots(
+                    evaluation_result=st.session_state.get("evaluation_result"),
+                    comparison_result=st.session_state.get("model_comparison_result"),
+                )
+        except (PlotExportError, TransformersPlotExportError) as error:
+            if plot_mode == "transformers":
+                st.session_state.transformers_plot_export_result = None
+            else:
+                st.session_state.plot_export_result = None
             st.error(str(error))
 
-    plot_export_result = st.session_state.plot_export_result
+    plot_export_result = (
+        st.session_state.transformers_plot_export_result
+        if plot_mode == "transformers"
+        else st.session_state.plot_export_result
+    )
     if plot_export_result is None:
         st.info(
             "После запуска здесь появятся пути к PNG-графикам по текущим результатам."
@@ -2179,11 +2474,19 @@ def _render_confusion_heatmap_section() -> None:
 
     if "confusion_heatmap_result" not in st.session_state:
         st.session_state.confusion_heatmap_result = None
+    if "transformers_confusion_heatmap_result" not in st.session_state:
+        st.session_state.transformers_confusion_heatmap_result = None
 
     st.subheader("PNG-матрицы ошибок")
+    heatmap_mode = st.radio(
+        "Тип матриц ошибок",
+        options=["sklearn", "transformers"],
+        format_func=lambda value: "Классические модели" if value == "sklearn" else "Transformers",
+        horizontal=True,
+        key="confusion_heatmap_mode",
+    )
     st.caption(
-        "На этом этапе можно выгрузить PNG-тепловые карты матриц ошибок для "
-        "validation/test и для пакетной оценки на размеченном CSV."
+        "На этом этапе можно выгрузить PNG-тепловые карты матриц ошибок для классических моделей или для transformers."
     )
 
     if st.button(
@@ -2191,15 +2494,39 @@ def _render_confusion_heatmap_section() -> None:
         use_container_width=True,
     ):
         try:
-            st.session_state.confusion_heatmap_result = export_confusion_heatmaps(
-                detailed_evaluation_result=st.session_state.get("detailed_evaluation_result"),
-                batch_evaluation_result=st.session_state.get("batch_inference_evaluation_result"),
-            )
-        except ConfusionHeatmapExportError as error:
-            st.session_state.confusion_heatmap_result = None
+            if heatmap_mode == "transformers":
+                st.session_state.transformers_confusion_heatmap_result = (
+                    export_transformers_confusion_heatmaps(
+                        batch_evaluation_result=st.session_state.get(
+                            "batch_inference_evaluation_result"
+                        )
+                        if isinstance(
+                            st.session_state.get("batch_inference_evaluation_result"),
+                            TransformersBatchInferenceEvaluationResult,
+                        )
+                        else None,
+                    )
+                )
+            else:
+                st.session_state.confusion_heatmap_result = export_confusion_heatmaps(
+                    detailed_evaluation_result=st.session_state.get("detailed_evaluation_result"),
+                    batch_evaluation_result=st.session_state.get("batch_inference_evaluation_result"),
+                )
+        except (
+            ConfusionHeatmapExportError,
+            TransformersConfusionHeatmapExportError,
+        ) as error:
+            if heatmap_mode == "transformers":
+                st.session_state.transformers_confusion_heatmap_result = None
+            else:
+                st.session_state.confusion_heatmap_result = None
             st.error(str(error))
 
-    confusion_heatmap_result = st.session_state.confusion_heatmap_result
+    confusion_heatmap_result = (
+        st.session_state.transformers_confusion_heatmap_result
+        if heatmap_mode == "transformers"
+        else st.session_state.confusion_heatmap_result
+    )
     if confusion_heatmap_result is None:
         st.info(
             "После запуска здесь появятся пути к PNG-тепловым картам матриц ошибок."
