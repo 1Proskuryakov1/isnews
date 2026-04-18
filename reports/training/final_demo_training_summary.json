@@ -1,0 +1,71 @@
+{
+  "generated_at": "2026-04-19T00:55:42+03:00",
+  "task": "Классификация новостных публикаций по тематическим категориям",
+  "dataset": {
+    "raw_dataset_path": "C:\\projects\\isnews\\data\\raw\\news_demo_dataset.csv",
+    "processed_dataset_path": "C:\\projects\\isnews\\data\\processed\\news_demo_dataset_processed.csv",
+    "split_directory": "C:\\projects\\isnews\\data\\splits\\news_demo_dataset",
+    "rows_after_preprocessing": 180,
+    "class_labels": [
+      "культура",
+      "политика",
+      "спорт",
+      "технологии",
+      "экономика"
+    ],
+    "train_rows": 126,
+    "validation_rows": 27,
+    "test_rows": 27
+  },
+  "features": {
+    "feature_directory": "C:\\projects\\isnews\\data\\features\\news_demo_dataset_tfidf",
+    "vectorizer_path": "C:\\projects\\isnews\\models\\vectorizers\\model_vectorizer.joblib",
+    "vocabulary_size": 701,
+    "train_shape": [
+      126,
+      701
+    ],
+    "validation_shape": [
+      27,
+      701
+    ],
+    "test_shape": [
+      27,
+      701
+    ]
+  },
+  "models": [
+    {
+      "model_name": "LogisticRegression",
+      "model_path": "C:\\projects\\isnews\\models\\classifiers\\model.joblib",
+      "final_summary_path": "C:\\projects\\isnews\\reports\\training\\final_demo_training_summary.json",
+      "class_count": 5,
+      "train_rows": 126,
+      "validation_rows": 27,
+      "test_rows": 27,
+      "training_seconds": 0.009,
+      "train_accuracy": 1.0,
+      "validation_accuracy": 1.0,
+      "test_accuracy": 1.0,
+      "validation_f1_macro": 1.0,
+      "test_f1_macro": 1.0,
+      "warning_messages": []
+    },
+    {
+      "model_name": "MultinomialNB",
+      "model_path": "C:\\projects\\isnews\\models\\classifiers\\model1.joblib",
+      "final_summary_path": "C:\\projects\\isnews\\reports\\training\\final_demo_training_summary.json",
+      "class_count": 5,
+      "train_rows": 126,
+      "validation_rows": 27,
+      "test_rows": 27,
+      "training_seconds": 0.0016,
+      "train_accuracy": 1.0,
+      "validation_accuracy": 1.0,
+      "test_accuracy": 1.0,
+      "validation_f1_macro": 1.0,
+      "test_f1_macro": 1.0,
+      "warning_messages": []
+    }
+  ]
+}

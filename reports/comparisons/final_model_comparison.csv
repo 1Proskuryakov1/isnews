@@ -1,0 +1,3 @@
+model_name,model_path,final_summary_path,class_count,train_rows,validation_rows,test_rows,training_seconds,train_accuracy,validation_accuracy,test_accuracy,validation_f1_macro,test_f1_macro,warning_messages
+MultinomialNB,C:\projects\isnews\models\classifiers\model1.joblib,C:\projects\isnews\reports\training\final_demo_training_summary.json,5,126,27,27,0.0016,1.0,1.0,1.0,1.0,1.0,[]
+LogisticRegression,C:\projects\isnews\models\classifiers\model.joblib,C:\projects\isnews\reports\training\final_demo_training_summary.json,5,126,27,27,0.009,1.0,1.0,1.0,1.0,1.0,[]

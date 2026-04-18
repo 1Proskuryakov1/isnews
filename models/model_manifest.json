@@ -1,0 +1,11 @@
+{
+  "generated_at": "2026-04-19T00:55:42+03:00",
+  "main_model": "C:\\projects\\isnews\\models\\classifiers\\model.joblib",
+  "additional_model": "C:\\projects\\isnews\\models\\classifiers\\model1.joblib",
+  "vectorizer": "C:\\projects\\isnews\\models\\vectorizers\\model_vectorizer.joblib",
+  "training_dataset": "C:\\projects\\isnews\\data\\raw\\news_demo_dataset.csv",
+  "processed_dataset": "C:\\projects\\isnews\\data\\processed\\news_demo_dataset_processed.csv",
+  "split_directory": "C:\\projects\\isnews\\data\\splits\\news_demo_dataset",
+  "comparison_report": "C:\\projects\\isnews\\reports\\comparisons\\final_model_comparison.csv",
+  "metrics_summary": "C:\\projects\\isnews\\reports\\training\\final_demo_training_summary.json"
+}
