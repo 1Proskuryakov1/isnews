@@ -85,8 +85,8 @@ def _get_available_path(target_path: Path) -> Path:
         counter += 1
 
 
-def _clean_text(text: str, config: TextPreprocessingConfig) -> str:
-    """Нормализует регистр, пробелы и базовое оформление знаков препинания."""
+def clean_text_value(text: str, config: TextPreprocessingConfig) -> str:
+    """Нормализует одиночный текст так же, как при предобработке датасета."""
     cleaned_text = text.replace("\u00a0", " ").replace("\t", " ").replace("\n", " ")
 
     if config.normalize_whitespace:
@@ -175,7 +175,7 @@ def preprocess_dataset(
 
     original_texts = processed_dataframe["text"].astype("string").fillna("")
     cleaned_texts = original_texts.map(
-        lambda text: _clean_text(str(text), resolved_config)
+        lambda text: clean_text_value(str(text), resolved_config)
     )
     processed_dataframe["text"] = cleaned_texts
     processed_dataframe["label"] = (

@@ -28,6 +28,11 @@ from src.isnews.saved_artifacts_loading import (
     SavedArtifactsLoadingResult,
     load_saved_artifacts,
 )
+from src.isnews.single_text_inference import (
+    SingleTextInferenceError,
+    SingleTextInferenceResult,
+    predict_single_news,
+)
 from src.isnews.text_preprocessing import TextPreprocessingError, TextPreprocessingResult
 from src.isnews.text_preprocessing import preprocess_dataset
 from src.isnews.tfidf_vectorization import (
@@ -332,6 +337,54 @@ def _render_loaded_artifacts_preview(
     )
 
 
+def _render_single_inference_preview(
+    inference_result: SingleTextInferenceResult,
+) -> None:
+    """Показывает результат классификации одной новости и вероятности по классам."""
+    import streamlit as st
+
+    inference_report = inference_result.report
+    probabilities_table = pd.DataFrame(
+        [
+            {
+                "Класс": item.label,
+                "Вероятность": item.probability,
+            }
+            for item in inference_report.class_probabilities
+        ]
+    )
+
+    st.success("Текст новости успешно классифицирован.")
+
+    metric_column_1, metric_column_2, metric_column_3 = st.columns(3)
+    metric_column_1.metric("Предсказанный класс", inference_report.predicted_label)
+    metric_column_2.metric(
+        "Вероятность класса",
+        inference_report.predicted_probability,
+    )
+    metric_column_3.metric("Длина текста, символов", inference_report.text_length_chars)
+
+    for warning_message in inference_report.warning_messages:
+        st.warning(warning_message)
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- источник модели: `{inference_report.source_name}`;",
+                f"- тип модели: `{inference_report.model_type}`;",
+                f"- тип векторизатора: `{inference_report.vectorizer_type}`;",
+                f"- JSON-отчет по инференсу: `{inference_result.paths.report_path}`.",
+            ]
+        )
+    )
+
+    st.write("Очищенный текст, поданный в модель:")
+    st.code(inference_result.cleaned_text, language="text")
+
+    st.write("Вероятности по классам:")
+    st.dataframe(probabilities_table, use_container_width=True)
+
+
 def _render_evaluation_preview(
     evaluation_result: ModelEvaluationResult,
 ) -> None:
@@ -506,6 +559,14 @@ def _reset_saved_artifacts_state() -> None:
 
     st.session_state.loaded_artifacts_result = None
     st.session_state.loaded_artifacts_selection_key = None
+
+
+def _reset_single_inference_state() -> None:
+    """Сбрасывает состояние одиночного инференса при смене текста или источника модели."""
+    import streamlit as st
+
+    st.session_state.single_inference_result = None
+    st.session_state.single_inference_request_key = None
 
 
 def _reset_vectorization_state() -> None:
@@ -806,6 +867,101 @@ def _render_saved_artifacts_loading_section() -> None:
     _render_loaded_artifacts_preview(loaded_artifacts_result)
 
 
+def _render_single_inference_section() -> None:
+    """Отрисовывает блок классификации одной новости через доступную модель."""
+    import streamlit as st
+
+    if "single_inference_result" not in st.session_state:
+        st.session_state.single_inference_result = None
+    if "single_inference_request_key" not in st.session_state:
+        st.session_state.single_inference_request_key = None
+
+    training_result = st.session_state.get("training_result")
+    vectorization_result = st.session_state.get("vectorization_result")
+    loaded_artifacts_result = st.session_state.get("loaded_artifacts_result")
+
+    available_sources: dict[str, dict[str, object]] = {}
+    if training_result is not None and vectorization_result is not None:
+        available_sources["Модель текущей сессии"] = {
+            "model": training_result.model,
+            "vectorizer": vectorization_result.vectorizer,
+            "source_name": f"session::{training_result.paths.model_path.name}",
+        }
+    if loaded_artifacts_result is not None:
+        available_sources["Загруженные артефакты"] = {
+            "model": loaded_artifacts_result.model,
+            "vectorizer": loaded_artifacts_result.vectorizer,
+            "source_name": f"loaded::{loaded_artifacts_result.paths.model_path.name}",
+        }
+
+    st.subheader("Инференс одной новости")
+    st.caption(
+        "На этом этапе можно вставить текст отдельной новости и получить предсказанный "
+        "класс вместе с вероятностями по всем классам через обученную или загруженную модель."
+    )
+
+    if not available_sources:
+        _reset_single_inference_state()
+        st.info(
+            "Для инференса пока нет доступной модели. Сначала обучите модель в текущей "
+            "сессии или загрузите сохраненные артефакты из файлов."
+        )
+        return
+
+    selected_source_label = st.radio(
+        "Источник модели",
+        options=list(available_sources.keys()),
+        horizontal=True,
+    )
+    news_text = st.text_area(
+        "Текст новости для классификации",
+        placeholder=(
+            "Например: Правительство представило новый пакет мер поддержки "
+            "региональной экономики и инвестиций."
+        ),
+        height=180,
+        key="single_inference_text",
+    )
+
+    selected_source = available_sources[selected_source_label]
+    current_request_key = f"{selected_source['source_name']}|{news_text}"
+    if st.session_state.single_inference_request_key != current_request_key:
+        st.session_state.single_inference_result = None
+        st.session_state.single_inference_request_key = current_request_key
+
+    st.markdown(
+        f"- выбранный источник: `{selected_source['source_name']}`;"
+    )
+
+    if st.button(
+        "Классифицировать новость",
+        use_container_width=True,
+    ):
+        try:
+            _reset_single_inference_state()
+            st.session_state.single_inference_result = predict_single_news(
+                news_text,
+                model=selected_source["model"],
+                vectorizer=selected_source["vectorizer"],
+                source_name=str(selected_source["source_name"]),
+            )
+            st.session_state.single_inference_request_key = current_request_key
+        except SingleTextInferenceError as error:
+            st.session_state.single_inference_result = None
+            st.session_state.single_inference_request_key = current_request_key
+            st.error(str(error))
+
+    inference_result = st.session_state.single_inference_result
+    if inference_result is None:
+        st.info(
+            "После запуска инференса здесь появятся предсказанный класс, вероятность, "
+            "очищенный текст и таблица вероятностей по всем классам."
+        )
+        return
+
+    _render_single_inference_preview(inference_result)
+
+
 def _render_evaluation_section(
     split_result: DatasetSplitResult,
     vectorization_result: TfidfVectorizationResult,
@@ -1098,6 +1254,7 @@ def render_main_page() -> None:
 
     _render_dataset_loading_section()
     _render_saved_artifacts_loading_section()
+    _render_single_inference_section()
 
     st.subheader("Базовые директории проекта")
     st.code(
@@ -1123,6 +1280,7 @@ def render_main_page() -> None:
                 f"Каталог отчетов по метрикам: {PROJECT_PATHS.metrics_reports_dir}",
                 f"Каталог подробных отчетов: {PROJECT_PATHS.detailed_metrics_reports_dir}",
                 f"Каталог отчетов по загрузке артефактов: {PROJECT_PATHS.loading_reports_dir}",
+                f"Каталог отчетов по инференсу: {PROJECT_PATHS.inference_reports_dir}",
             ]
         ),
         language="text",
