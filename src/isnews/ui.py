@@ -14,6 +14,11 @@ from src.isnews.batch_inference_evaluation import (
     BatchInferenceEvaluationResult,
     evaluate_batch_inference,
 )
+from src.isnews.batch_error_analysis import (
+    BatchErrorAnalysisError,
+    BatchErrorAnalysisResult,
+    analyze_batch_errors,
+)
 from src.isnews.config import PROJECT_PATHS
 from src.isnews.data_loading import DatasetLoadResult, DatasetValidationError
 from src.isnews.detailed_model_evaluation import (
@@ -530,6 +535,42 @@ def _render_prediction_confidence_preview(
         st.dataframe(confidence_result.uncertain_dataframe, use_container_width=True)
 
 
+def _render_batch_error_analysis_preview(
+    error_analysis_result: BatchErrorAnalysisResult,
+) -> None:
+    """Показывает таблицу неверно классифицированных строк."""
+    import streamlit as st
+
+    error_report = error_analysis_result.report
+
+    st.success("Анализ ошибок по размеченному CSV успешно сформирован.")
+
+    metric_column_1, metric_column_2, metric_column_3 = st.columns(3)
+    metric_column_1.metric("Проверено строк", error_report.analyzed_rows)
+    metric_column_2.metric("Ошибок", error_report.misclassified_rows)
+    metric_column_3.metric("Доля ошибок", error_report.error_rate)
+
+    for warning_message in error_report.warning_messages:
+        st.warning(warning_message)
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- колонка истинного класса: `{error_report.label_column}`;",
+                f"- CSV с ошибками: `{error_analysis_result.paths.misclassified_rows_path}`;",
+                f"- JSON-отчет: `{error_analysis_result.paths.report_path}`.",
+            ]
+        )
+    )
+
+    if error_analysis_result.misclassified_dataframe.empty:
+        st.info("Ошибочных классификаций не найдено.")
+        return
+
+    st.write("Неверно классифицированные строки:")
+    st.dataframe(error_analysis_result.misclassified_dataframe, use_container_width=True)
+
+
 def _render_experiment_registry_preview(
     registry_result: ExperimentRegistryResult,
 ) -> None:
@@ -818,6 +859,15 @@ def _reset_batch_inference_evaluation_state() -> None:
 
     st.session_state.batch_inference_evaluation_result = None
     st.session_state.batch_inference_evaluation_source_key = None
+    _reset_batch_error_analysis_state()
+
+
+def _reset_batch_error_analysis_state() -> None:
+    """Сбрасывает анализ ошибочных классификаций при смене оценки."""
+    import streamlit as st
+
+    st.session_state.batch_error_analysis_result = None
+    st.session_state.batch_error_analysis_source_key = None
 
 
 def _get_available_inference_sources() -> dict[str, dict[str, object]]:
@@ -1436,6 +1486,57 @@ def _render_batch_inference_evaluation_section(
         return
 
     _render_batch_inference_evaluation_preview(evaluation_result)
+    _render_batch_error_analysis_section(batch_inference_result, evaluation_result)
+
+
+def _render_batch_error_analysis_section(
+    batch_inference_result: BatchTextInferenceResult,
+    evaluation_result: BatchInferenceEvaluationResult,
+) -> None:
+    """Отрисовывает блок сохранения только неверно классифицированных строк."""
+    import streamlit as st
+
+    current_source_key = str(evaluation_result.paths.report_path)
+    if "batch_error_analysis_result" not in st.session_state:
+        st.session_state.batch_error_analysis_result = None
+    if "batch_error_analysis_source_key" not in st.session_state:
+        st.session_state.batch_error_analysis_source_key = None
+
+    if st.session_state.batch_error_analysis_source_key != current_source_key:
+        st.session_state.batch_error_analysis_result = None
+        st.session_state.batch_error_analysis_source_key = current_source_key
+
+    st.subheader("Анализ ошибок")
+    st.caption(
+        "На этом этапе можно сохранить отдельную таблицу только с теми новостями, "
+        "которые модель классифицировала неверно."
+    )
+
+    if st.button(
+        "Сформировать таблицу ошибок",
+        use_container_width=True,
+    ):
+        try:
+            _reset_batch_error_analysis_state()
+            st.session_state.batch_error_analysis_result = analyze_batch_errors(
+                batch_inference_result,
+                evaluation_result.report,
+            )
+            st.session_state.batch_error_analysis_source_key = current_source_key
+        except BatchErrorAnalysisError as error:
+            st.session_state.batch_error_analysis_result = None
+            st.session_state.batch_error_analysis_source_key = current_source_key
+            st.error(str(error))
+
+    error_analysis_result = st.session_state.batch_error_analysis_result
+    if error_analysis_result is None:
+        st.info(
+            "После запуска здесь появится таблица только с неверно "
+            "классифицированными строками."
+        )
+        return
+
+    _render_batch_error_analysis_preview(error_analysis_result)
 
 
 def _render_experiment_registry_section() -> None:
@@ -1829,6 +1930,7 @@ def render_main_page() -> None:
                 f"Каталог сводных реестров экспериментов: {PROJECT_PATHS.experiment_reports_dir}",
                 f"Каталог сравнений моделей: {PROJECT_PATHS.comparison_reports_dir}",
                 f"Каталог анализа уверенности предсказаний: {PROJECT_PATHS.confidence_reports_dir}",
+                f"Каталог анализа ошибок: {PROJECT_PATHS.error_analysis_reports_dir}",
             ]
         ),
         language="text",
