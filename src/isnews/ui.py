@@ -1607,15 +1607,17 @@ def _render_transformers_artifacts_loading_section() -> None:
 
     st.subheader("Загрузка transformers-модели")
     st.caption(
-        "Этот блок позволяет выбрать локальные каталоги `save_pretrained` для модели и "
-        "токенизатора, а также при необходимости подключить файл весов `model*.pt`."
+        "Это дополнительная нейросетевая ветка для Colab-экспериментов. "
+        "Для основной проверки ВКР она не обязательна: готовая сдаваемая версия "
+        "использует `.joblib`-модели из блока выше."
     )
 
     if not model_directories or not tokenizer_directories:
         _reset_transformers_artifacts_state()
         st.info(
-            "В каталоге `models` пока нет полного набора локальных transformers-артефактов. "
-            "Сначала выгрузите их из Google Colab или добавьте в проект."
+            "Локальные transformers-артефакты не найдены. Это нормально для основной "
+            "демонстрации: используйте `model.joblib` и `model_vectorizer.joblib`. "
+            "Этот блок нужен только если отдельно выгрузить transformer-модель из Google Colab."
         )
         return
 
@@ -2857,7 +2859,8 @@ def _render_dataset_loading_section() -> None:
 
     st.subheader("Загрузка датасета")
     st.caption(
-        "На текущем этапе датасет должен содержать колонку с текстом новости и "
+        "Этот блок нужен, если вы хотите загрузить свой CSV и переобучить модель. "
+        "Датасет должен содержать колонку с текстом новости и "
         "колонку с меткой класса. Поддерживаются алиасы вроде `text`, `content`, "
         "`title`, `label`, `category`, `topic`, а также русскоязычные варианты."
     )
@@ -2868,8 +2871,8 @@ def _render_dataset_loading_section() -> None:
             "Выберите CSV-файл с новостными публикациями",
             type=["csv"],
             help=(
-                "На этом этапе поддерживается базовая загрузка CSV. "
-                "В следующих итерациях будет добавлена проверка структуры датасета."
+                "Файл сразу проверяется: приложение ищет колонку текста и колонку класса, "
+                "сохраняет копию в `data/raw` и показывает сводку по данным."
             ),
         )
 
@@ -2955,6 +2958,249 @@ def _render_dataset_loading_section() -> None:
         )
 
 
+def _render_quick_demo_section() -> None:
+    """Показывает самый короткий сценарий проверки готовой модели без переобучения."""
+    import json
+    import streamlit as st
+
+    model_path = PROJECT_PATHS.classifiers_dir / "model.joblib"
+    second_model_path = PROJECT_PATHS.classifiers_dir / "model1.joblib"
+    vectorizer_path = PROJECT_PATHS.vectorizers_dir / "model_vectorizer.joblib"
+    test_dataset_path = PROJECT_PATHS.split_data_dir / "news_demo_dataset" / "test.csv"
+    summary_path = PROJECT_PATHS.training_reports_dir / "final_demo_training_summary.json"
+
+    st.subheader("Быстрая проверка готовой модели")
+    st.write(
+        "Если нужно просто показать, что сервис работает, не начинайте с обучения. "
+        "Загрузите готовые артефакты `model.joblib` и `model_vectorizer.joblib`, "
+        "а затем выполните классификацию одной новости или CSV-файла ниже."
+    )
+
+    metric_column_1, metric_column_2, metric_column_3 = st.columns(3)
+    metric_column_1.metric("Основная модель", "model.joblib" if model_path.exists() else "нет файла")
+    metric_column_2.metric("Векторизатор", "model_vectorizer.joblib" if vectorizer_path.exists() else "нет файла")
+    metric_column_3.metric("Тестовый CSV", "test.csv" if test_dataset_path.exists() else "нет файла")
+
+    if summary_path.exists():
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            models = summary.get("models", [])
+            if models:
+                st.caption(
+                    "Сохраненные метрики: "
+                    + "; ".join(
+                        f"{model['model_name']} test Accuracy = {model['test_accuracy']}"
+                        for model in models
+                    )
+                )
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            st.caption("Итоговый JSON-отчет найден, но не был прочитан для краткой сводки.")
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- датасет для ручного обучения: `{PROJECT_PATHS.raw_data_dir / 'news_demo_dataset.csv'}`;",
+                f"- CSV для пакетного теста: `{test_dataset_path}`;",
+                f"- дополнительная модель для сравнения: `{second_model_path}`.",
+            ]
+        )
+    )
+
+    if st.button("Загрузить готовую модель для демонстрации", use_container_width=True):
+        if not model_path.exists() or not vectorizer_path.exists():
+            st.error(
+                "Не найдены `model.joblib` или `model_vectorizer.joblib`. "
+                "Сначала выполните `python scripts\\train_demo_artifacts.py`."
+            )
+            return
+
+        try:
+            _reset_saved_artifacts_state()
+            st.session_state.loaded_artifacts_result = load_saved_artifacts(
+                model_path,
+                vectorizer_path,
+            )
+            st.session_state.loaded_artifacts_selection_key = (
+                f"{model_path.name}|{vectorizer_path.name}"
+            )
+            _reset_single_inference_state()
+            _reset_batch_inference_state()
+            st.success(
+                "Готовая модель загружена. Теперь в блоке `Инференс одной новости` "
+                "вставьте текст новости и нажмите `Классифицировать новость`."
+            )
+        except SavedArtifactsLoadingError as error:
+            st.session_state.loaded_artifacts_result = None
+            st.error(str(error))
+
+
+def _inject_app_styles() -> None:
+    """Добавляет компактные стили, чтобы интерфейс был похож на понятную панель управления."""
+    import streamlit as st
+
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            padding-top: 2.2rem;
+            padding-bottom: 3rem;
+            max-width: 1180px;
+        }
+        .isnews-hero {
+            padding: 2.1rem 2.2rem;
+            border-radius: 28px;
+            background:
+                radial-gradient(circle at 18% 12%, rgba(255, 180, 80, 0.26), transparent 30%),
+                linear-gradient(135deg, #14213d 0%, #1f4e5f 58%, #e57a44 140%);
+            color: #ffffff;
+            margin-bottom: 1.4rem;
+            box-shadow: 0 24px 70px rgba(20, 33, 61, 0.22);
+        }
+        .isnews-hero h1 {
+            margin: 0 0 0.55rem 0;
+            font-size: 2.55rem;
+            line-height: 1.05;
+            letter-spacing: -0.04em;
+        }
+        .isnews-hero p {
+            margin: 0;
+            max-width: 860px;
+            color: rgba(255, 255, 255, 0.86);
+            font-size: 1.02rem;
+        }
+        .isnews-pill-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            margin-top: 1.15rem;
+        }
+        .isnews-pill {
+            padding: 0.42rem 0.7rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.14);
+            border: 1px solid rgba(255, 255, 255, 0.24);
+            color: #ffffff;
+            font-size: 0.88rem;
+        }
+        .isnews-card-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.85rem;
+            margin: 0.75rem 0 1.2rem 0;
+        }
+        .isnews-card {
+            padding: 1rem 1rem 1.05rem;
+            border-radius: 20px;
+            background: #fffaf2;
+            border: 1px solid #f0dfc5;
+            min-height: 126px;
+        }
+        .isnews-card strong {
+            display: block;
+            color: #14213d;
+            font-size: 1rem;
+            margin-bottom: 0.4rem;
+        }
+        .isnews-card span {
+            color: #52616b;
+            font-size: 0.92rem;
+            line-height: 1.4;
+        }
+        .isnews-note {
+            padding: 0.9rem 1rem;
+            border-radius: 16px;
+            background: #eef7f2;
+            border: 1px solid #cfe8dc;
+            color: #24443a;
+            margin: 0.7rem 0 1rem 0;
+        }
+        div[data-testid="stMetric"] {
+            background: #ffffff;
+            border: 1px solid #edf0f2;
+            border-radius: 18px;
+            padding: 0.9rem 1rem;
+            box-shadow: 0 12px 30px rgba(20, 33, 61, 0.06);
+        }
+        .stButton > button {
+            border-radius: 14px;
+            min-height: 2.55rem;
+            font-weight: 600;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 0.35rem;
+        }
+        .stTabs [data-baseweb="tab"] {
+            border-radius: 999px;
+            padding: 0.55rem 1rem;
+            background: #f6f4ef;
+        }
+        @media (max-width: 900px) {
+            .isnews-card-grid {
+                grid-template-columns: 1fr;
+            }
+            .isnews-hero h1 {
+                font-size: 2rem;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_hero_section() -> None:
+    """Показывает понятное описание сервиса и основной пользовательский маршрут."""
+    import streamlit as st
+
+    st.markdown(
+        """
+        <section class="isnews-hero">
+            <h1>Классификация новостных публикаций</h1>
+            <p>
+                Готовый интеллектуальный сервис ВКР: можно сразу загрузить сохраненную модель,
+                проверить одну новость, обработать CSV-файл или переобучить модель на своем датасете.
+            </p>
+            <div class="isnews-pill-row">
+                <span class="isnews-pill">Готовая модель: model.joblib</span>
+                <span class="isnews-pill">5 классов новостей</span>
+                <span class="isnews-pill">Accuracy test: 1.0</span>
+                <span class="isnews-pill">Google Colab + локальная демонстрация</span>
+            </div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_workflow_cards() -> None:
+    """Рисует четыре карточки с основными сценариями работы."""
+    import streamlit as st
+
+    st.markdown(
+        """
+        <div class="isnews-card-grid">
+            <div class="isnews-card">
+                <strong>1. Быстрый показ</strong>
+                <span>Нажмите кнопку загрузки готовой модели и проверьте одну новость.</span>
+            </div>
+            <div class="isnews-card">
+                <strong>2. CSV-проверка</strong>
+                <span>Загрузите test.csv и получите таблицу предсказанных классов.</span>
+            </div>
+            <div class="isnews-card">
+                <strong>3. Обучение</strong>
+                <span>Загрузите датасет с колонками text и label, затем пройдите этапы ML.</span>
+            </div>
+            <div class="isnews-card">
+                <strong>4. Отчеты ВКР</strong>
+                <span>Сформируйте сравнение моделей, DOCX/Markdown, графики и deployment-файлы.</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_main_page() -> None:
     """Отрисовывает стартовую страницу интерфейса проекта."""
     import streamlit as st
@@ -2966,88 +3212,137 @@ def render_main_page() -> None:
         layout="wide",
     )
 
-    st.title("Интеллектуальный сервис классификации новостей")
-    st.caption(
-        "Стартовый каркас проекта ВКР. На следующих этапах сюда будет добавлена "
-        "загрузка датасетов, обучение моделей, сохранение артефактов и инференс."
-    )
+    _inject_app_styles()
+    _render_hero_section()
+    _render_workflow_cards()
 
-    st.subheader("Назначение системы")
-    st.write(
-        "Приложение предназначено для экспериментов с моделями классификации "
-        "новостных публикаций и для демонстрации полного жизненного цикла: "
-        "от загрузки данных до применения сохраненной модели."
-    )
-
-    st.subheader("Планируемые возможности")
     st.markdown(
         """
-        - загрузка датасета из локального файла или по прямой ссылке;
-        - предобработка и анализ новостных текстов;
-        - обучение нескольких моделей;
-        - сохранение и загрузка обученных моделей;
-        - классификация новых новостей;
-        - сравнение метрик качества.
-        """
+        <div class="isnews-note">
+        <strong>Как проверять быстрее всего:</strong>
+        откройте вкладку <strong>Демонстрация</strong>, нажмите
+        <strong>Загрузить готовую модель для демонстрации</strong>, затем вставьте текст новости
+        и нажмите <strong>Классифицировать новость</strong>.
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    _render_dataset_loading_section()
-    _render_saved_artifacts_loading_section()
-    _render_transformers_artifacts_loading_section()
-    _render_single_inference_section()
-    _render_batch_inference_section()
-    _render_experiment_registry_section()
-    _render_model_comparison_section()
-    _render_html_report_section()
-    _render_docx_report_section()
-    _render_markdown_report_section()
-    _render_thesis_tables_section()
-    _render_plot_export_section()
-    _render_confusion_heatmap_section()
-    _render_deployment_manifest_section()
-    _render_deployment_guide_section()
-
-    st.subheader("Базовые директории проекта")
-    st.code(
-        "\n".join(
-            [
-                f"Корень проекта: {PROJECT_PATHS.root}",
-                f"Каталог документации: {PROJECT_PATHS.docs_dir}",
-                f"Каталог данных: {PROJECT_PATHS.data_dir}",
-                f"Каталог исходных датасетов: {PROJECT_PATHS.raw_data_dir}",
-                f"Каталог очищенных датасетов: {PROJECT_PATHS.processed_data_dir}",
-                f"Каталог выборок train/validation/test: {PROJECT_PATHS.split_data_dir}",
-                f"Каталог матриц признаков: {PROJECT_PATHS.feature_data_dir}",
-                f"Каталог моделей: {PROJECT_PATHS.models_dir}",
-                f"Каталог векторизаторов: {PROJECT_PATHS.vectorizers_dir}",
-                f"Каталог классификаторов: {PROJECT_PATHS.classifiers_dir}",
-                f"Каталог ноутбуков: {PROJECT_PATHS.notebooks_dir}",
-                f"Каталог отчетов: {PROJECT_PATHS.reports_dir}",
-                f"Каталог JSON-сводок: {PROJECT_PATHS.dataset_reports_dir}",
-                f"Каталог отчетов предобработки: {PROJECT_PATHS.preprocessing_reports_dir}",
-                f"Каталог отчетов по сплитам: {PROJECT_PATHS.split_reports_dir}",
-                f"Каталог отчетов по векторизации: {PROJECT_PATHS.vectorization_reports_dir}",
-                f"Каталог отчетов по обучению: {PROJECT_PATHS.training_reports_dir}",
-                f"Каталог отчетов по метрикам: {PROJECT_PATHS.metrics_reports_dir}",
-                f"Каталог подробных отчетов: {PROJECT_PATHS.detailed_metrics_reports_dir}",
-                f"Каталог отчетов по загрузке артефактов: {PROJECT_PATHS.loading_reports_dir}",
-                f"Каталог отчетов по инференсу: {PROJECT_PATHS.inference_reports_dir}",
-                f"Каталог сводных реестров экспериментов: {PROJECT_PATHS.experiment_reports_dir}",
-                f"Каталог сравнений моделей: {PROJECT_PATHS.comparison_reports_dir}",
-                f"Каталог анализа уверенности предсказаний: {PROJECT_PATHS.confidence_reports_dir}",
-                f"Каталог анализа ошибок: {PROJECT_PATHS.error_analysis_reports_dir}",
-                f"Каталог HTML-отчетов: {PROJECT_PATHS.html_reports_dir}",
-                f"Каталог DOCX-отчетов: {PROJECT_PATHS.docx_reports_dir}",
-                f"Каталог Markdown-отчетов: {PROJECT_PATHS.markdown_reports_dir}",
-                f"Каталог CSV-таблиц для ВКР: {PROJECT_PATHS.thesis_tables_reports_dir}",
-                f"Каталог PNG-графиков: {PROJECT_PATHS.plots_reports_dir}",
-                f"Каталог PNG-матриц ошибок: {PROJECT_PATHS.heatmaps_reports_dir}",
-            ]
-        ),
-        language="text",
+    demo_tab, training_tab, reports_tab, deployment_tab, extra_tab = st.tabs(
+        [
+            "Демонстрация",
+            "Обучение с нуля",
+            "Отчеты для ВКР",
+            "Развертывание",
+            "Дополнительно",
+        ]
     )
 
-    st.info(
-        "Текущая версия приложения является стартовой. "
-        "Функциональные вкладки будут добавляться постепенно, отдельными коммитами."
-    )
+    with demo_tab:
+        _render_quick_demo_section()
+        with st.expander("Ручная загрузка model.joblib и векторизатора", expanded=False):
+            st.caption(
+                "Этот блок нужен, если хотите вручную выбрать другой `.joblib`-файл. "
+                "Для обычного показа достаточно кнопки быстрой загрузки выше."
+            )
+            _render_saved_artifacts_loading_section()
+        _render_single_inference_section()
+        _render_batch_inference_section()
+
+    with training_tab:
+        st.markdown(
+            """
+            <div class="isnews-note">
+            Этот раздел нужен только если вы хотите переобучить модель. Для простой демонстрации
+            готового сервиса возвращайтесь во вкладку <strong>Демонстрация</strong>.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        _render_dataset_loading_section()
+
+    with reports_tab:
+        st.markdown(
+            """
+            <div class="isnews-note">
+            Эти функции нужны не для первого запуска, а для ВКР: они формируют таблицы,
+            графики, матрицы ошибок и отчеты, которые можно приложить к разделу тестирования.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.expander("Сводка экспериментов и сравнение моделей", expanded=True):
+            _render_experiment_registry_section()
+            _render_model_comparison_section()
+        with st.expander("Отчеты для текста ВКР: HTML, DOCX, Markdown и CSV-таблицы"):
+            _render_html_report_section()
+            _render_docx_report_section()
+            _render_markdown_report_section()
+            _render_thesis_tables_section()
+        with st.expander("PNG-графики и матрицы ошибок"):
+            _render_plot_export_section()
+            _render_confusion_heatmap_section()
+
+    with deployment_tab:
+        st.markdown(
+            """
+            <div class="isnews-note">
+            Этот раздел нужен, чтобы показать готовность к развертыванию: какие файлы входят
+            в поставку, как запускать сервис и где лежат модели, данные и отчеты.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        _render_deployment_manifest_section()
+        _render_deployment_guide_section()
+        with st.expander("Технические директории проекта", expanded=False):
+            st.code(
+                "\n".join(
+                    [
+                        f"Корень проекта: {PROJECT_PATHS.root}",
+                        f"Каталог документации: {PROJECT_PATHS.docs_dir}",
+                        f"Каталог данных: {PROJECT_PATHS.data_dir}",
+                        f"Каталог исходных датасетов: {PROJECT_PATHS.raw_data_dir}",
+                        f"Каталог очищенных датасетов: {PROJECT_PATHS.processed_data_dir}",
+                        f"Каталог выборок train/validation/test: {PROJECT_PATHS.split_data_dir}",
+                        f"Каталог матриц признаков: {PROJECT_PATHS.feature_data_dir}",
+                        f"Каталог моделей: {PROJECT_PATHS.models_dir}",
+                        f"Каталог векторизаторов: {PROJECT_PATHS.vectorizers_dir}",
+                        f"Каталог классификаторов: {PROJECT_PATHS.classifiers_dir}",
+                        f"Каталог ноутбуков: {PROJECT_PATHS.notebooks_dir}",
+                        f"Каталог отчетов: {PROJECT_PATHS.reports_dir}",
+                        f"Каталог JSON-сводок: {PROJECT_PATHS.dataset_reports_dir}",
+                        f"Каталог отчетов предобработки: {PROJECT_PATHS.preprocessing_reports_dir}",
+                        f"Каталог отчетов по сплитам: {PROJECT_PATHS.split_reports_dir}",
+                        f"Каталог отчетов по векторизации: {PROJECT_PATHS.vectorization_reports_dir}",
+                        f"Каталог отчетов по обучению: {PROJECT_PATHS.training_reports_dir}",
+                        f"Каталог отчетов по метрикам: {PROJECT_PATHS.metrics_reports_dir}",
+                        f"Каталог подробных отчетов: {PROJECT_PATHS.detailed_metrics_reports_dir}",
+                        f"Каталог отчетов по загрузке артефактов: {PROJECT_PATHS.loading_reports_dir}",
+                        f"Каталог отчетов по инференсу: {PROJECT_PATHS.inference_reports_dir}",
+                        f"Каталог сводных реестров экспериментов: {PROJECT_PATHS.experiment_reports_dir}",
+                        f"Каталог сравнений моделей: {PROJECT_PATHS.comparison_reports_dir}",
+                        f"Каталог анализа уверенности предсказаний: {PROJECT_PATHS.confidence_reports_dir}",
+                        f"Каталог анализа ошибок: {PROJECT_PATHS.error_analysis_reports_dir}",
+                        f"Каталог HTML-отчетов: {PROJECT_PATHS.html_reports_dir}",
+                        f"Каталог DOCX-отчетов: {PROJECT_PATHS.docx_reports_dir}",
+                        f"Каталог Markdown-отчетов: {PROJECT_PATHS.markdown_reports_dir}",
+                        f"Каталог CSV-таблиц для ВКР: {PROJECT_PATHS.thesis_tables_reports_dir}",
+                        f"Каталог PNG-графиков: {PROJECT_PATHS.plots_reports_dir}",
+                        f"Каталог PNG-матриц ошибок: {PROJECT_PATHS.heatmaps_reports_dir}",
+                    ]
+                ),
+                language="text",
+            )
+
+    with extra_tab:
+        st.markdown(
+            """
+            <div class="isnews-note">
+            Здесь находятся дополнительные возможности. Они не нужны для базовой демонстрации
+            `model.joblib`, но показывают, что проект можно расширять нейросетевыми моделями.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        _render_transformers_artifacts_loading_section()
