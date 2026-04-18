@@ -6,11 +6,11 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
 
 from src.isnews.config import PROJECT_PATHS, ProjectPaths
 from src.isnews.data_loading import TEXT_COLUMN_CANDIDATES
@@ -92,17 +92,13 @@ def _find_text_column(columns: pd.Index) -> str:
 def _validate_inputs(
     *,
     dataframe: pd.DataFrame,
-    model: LogisticRegression,
+    model: Any,
     vectorizer: TfidfVectorizer,
 ) -> None:
     """Проверяет входную таблицу и наличие обученных артефактов."""
     if dataframe.empty:
         raise BatchTextInferenceError(
             "CSV-файл для пакетного инференса пуст."
-        )
-    if not isinstance(model, LogisticRegression):
-        raise BatchTextInferenceError(
-            "Для пакетного инференса ожидается модель типа `LogisticRegression`."
         )
     if not isinstance(vectorizer, TfidfVectorizer):
         raise BatchTextInferenceError(
@@ -152,7 +148,7 @@ def _save_batch_inference_report(
 def predict_batch_news(
     dataframe: pd.DataFrame,
     *,
-    model: LogisticRegression,
+    model: Any,
     vectorizer: TfidfVectorizer,
     source_name: str,
     project_paths: ProjectPaths = PROJECT_PATHS,

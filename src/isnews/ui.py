@@ -33,6 +33,11 @@ from src.isnews.logistic_regression_training import (
     LogisticRegressionTrainingResult,
     train_logistic_regression,
 )
+from src.isnews.multinomial_nb_training import (
+    MultinomialNBTrainingError,
+    MultinomialNBTrainingResult,
+    train_multinomial_nb,
+)
 from src.isnews.model_evaluation import (
     ModelEvaluationError,
     ModelEvaluationResult,
@@ -276,42 +281,50 @@ def _render_vectorization_preview(
 
 
 def _render_training_preview(
-    training_result: LogisticRegressionTrainingResult,
+    training_result: LogisticRegressionTrainingResult | MultinomialNBTrainingResult,
 ) -> None:
-    """Показывает результат обучения базовой модели Logistic Regression."""
+    """Показывает результат обучения базовой модели и ключевые параметры классификатора."""
     import streamlit as st
 
     training_report = training_result.report
+    model_name = getattr(training_report, "model_name", type(training_result.model).__name__)
 
     st.success(
-        "Базовая модель Logistic Regression обучена и сохранена."
+        f"Базовая модель `{model_name}` обучена и сохранена."
     )
 
     metric_column_1, metric_column_2, metric_column_3, metric_column_4 = st.columns(4)
     metric_column_1.metric("Классов", len(training_report.class_labels))
     metric_column_2.metric("Время обучения, сек", training_report.training_seconds)
-    metric_column_3.metric(
-        "Размер coef_",
-        f"{training_report.coefficient_shape[0]} x {training_report.coefficient_shape[1]}",
-    )
-    metric_column_4.metric(
-        "Итераций",
-        ", ".join(str(value) for value in training_report.iterations_per_class),
-    )
+    if hasattr(training_report, "coefficient_shape"):
+        metric_column_3.metric(
+            "Размер coef_",
+            f"{training_report.coefficient_shape[0]} x {training_report.coefficient_shape[1]}",
+        )
+    else:
+        metric_column_3.metric("Признаков", training_report.feature_count)
+    if hasattr(training_report, "iterations_per_class"):
+        metric_column_4.metric(
+            "Итераций",
+            ", ".join(str(value) for value in training_report.iterations_per_class),
+        )
+    else:
+        metric_column_4.metric("Alpha", training_report.alpha)
 
     for warning_message in training_report.warning_messages:
         st.warning(warning_message)
 
-    st.markdown(
-        "\n".join(
-            [
-                f"- классы модели: `{', '.join(training_report.class_labels)}`;",
-                f"- форма `intercept_`: `{training_report.intercept_shape}`;",
-                f"- сохраненная модель: `{training_result.paths.model_path}`;",
-                f"- JSON-отчет: `{training_result.paths.report_path}`.",
-            ]
-        )
-    )
+    details = [
+        f"- тип модели: `{model_name}`;",
+        f"- классы модели: `{', '.join(training_report.class_labels)}`;",
+        f"- сохраненная модель: `{training_result.paths.model_path}`;",
+        f"- JSON-отчет: `{training_result.paths.report_path}`.",
+    ]
+    if hasattr(training_report, "intercept_shape"):
+        details.insert(2, f"- форма `intercept_`: `{training_report.intercept_shape}`;")
+    if hasattr(training_report, "class_log_prior_shape"):
+        details.insert(2, f"- форма `class_log_prior_`: `{training_report.class_log_prior_shape}`;")
+    st.markdown("\n".join(details))
 
 
 def _render_loaded_artifacts_preview(
@@ -718,7 +731,12 @@ def _get_available_inference_sources() -> dict[str, dict[str, object]]:
     loaded_artifacts_result = st.session_state.get("loaded_artifacts_result")
 
     available_sources: dict[str, dict[str, object]] = {}
-    if training_result is not None and vectorization_result is not None:
+    if (
+        training_result is not None
+        and vectorization_result is not None
+        and hasattr(training_result.model, "predict_proba")
+        and hasattr(training_result.model, "classes_")
+    ):
         available_sources["Модель текущей сессии"] = {
             "model": training_result.model,
             "vectorizer": vectorization_result.vectorizer,
@@ -905,7 +923,13 @@ def _render_training_section(
     """Отрисовывает блок обучения базовой модели на TF-IDF признаках."""
     import streamlit as st
 
-    current_source_key = str(vectorization_result.paths.vectorizer_path)
+    selected_model_name = st.radio(
+        "Выберите базовую модель",
+        options=["Logistic Regression", "MultinomialNB"],
+        horizontal=True,
+        key="training_model_choice",
+    )
+    current_source_key = f"{vectorization_result.paths.vectorizer_path}|{selected_model_name}"
     if "training_result" not in st.session_state:
         st.session_state.training_result = None
     if "training_source_key" not in st.session_state:
@@ -915,11 +939,12 @@ def _render_training_section(
         st.session_state.training_result = None
         st.session_state.training_source_key = current_source_key
 
-    st.subheader("Обучение Logistic Regression")
+    st.subheader("Обучение базовой модели")
     st.caption(
-        "На этом этапе базовый линейный классификатор обучается на `train`-матрице "
-        "TF-IDF признаков и сохраняется в формате `.joblib`."
+        "На этом этапе можно обучить и сравнить две базовые модели на одной и той же "
+        "`train`-матрице TF-IDF признаков: `Logistic Regression` и `MultinomialNB`."
     )
+    st.markdown(f"- выбранная модель: `{selected_model_name}`;")
 
     if st.button(
         "Обучить базовую модель и сохранить классификатор",
@@ -927,12 +952,18 @@ def _render_training_section(
     ):
         try:
             _reset_training_state()
-            st.session_state.training_result = train_logistic_regression(
-                split_result,
-                vectorization_result,
-            )
+            if selected_model_name == "Logistic Regression":
+                st.session_state.training_result = train_logistic_regression(
+                    split_result,
+                    vectorization_result,
+                )
+            else:
+                st.session_state.training_result = train_multinomial_nb(
+                    split_result,
+                    vectorization_result,
+                )
             st.session_state.training_source_key = current_source_key
-        except LogisticRegressionTrainingError as error:
+        except (LogisticRegressionTrainingError, MultinomialNBTrainingError) as error:
             st.session_state.training_result = None
             st.error(str(error))
 

@@ -6,10 +6,10 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
 
 from src.isnews.config import PROJECT_PATHS, ProjectPaths
 from src.isnews.text_preprocessing import TextPreprocessingConfig, clean_text_value
@@ -58,6 +58,11 @@ class SingleTextInferenceResult:
     paths: SingleTextInferencePaths
 
 
+def _get_model_name(model: Any) -> str:
+    """Возвращает краткое имя типа классификатора."""
+    return type(model).__name__
+
+
 def _sanitize_name(name: str) -> str:
     """Подготавливает безопасное имя файла отчета по инференсу."""
     cleaned_name = "".join(
@@ -85,19 +90,15 @@ def _get_available_path(target_path: Path) -> Path:
 def _validate_inputs(
     *,
     input_text: str,
-    model: LogisticRegression,
+    model: Any,
     vectorizer: TfidfVectorizer,
 ) -> None:
     """Проверяет корректность входного текста и наличие обученных артефактов."""
-    if not isinstance(model, LogisticRegression):
-        raise SingleTextInferenceError(
-            "Для инференса ожидается объект модели типа `LogisticRegression`."
-        )
     if not isinstance(vectorizer, TfidfVectorizer):
         raise SingleTextInferenceError(
             "Для инференса ожидается объект векторизатора типа `TfidfVectorizer`."
         )
-    if not hasattr(model, "classes_") or not hasattr(model, "coef_"):
+    if not hasattr(model, "classes_") or not hasattr(model, "predict"):
         raise SingleTextInferenceError(
             "У переданной модели отсутствуют обученные параметры. Сначала обучите или загрузите модель."
         )
@@ -117,7 +118,7 @@ def _validate_inputs(
 
 def _build_probabilities(
     *,
-    model: LogisticRegression,
+    model: Any,
     probabilities: np.ndarray,
 ) -> tuple[ClassProbability, ...]:
     """Преобразует массив вероятностей в отсортированную сводку по классам."""
@@ -164,7 +165,7 @@ def _save_inference_report(
 def predict_single_news(
     input_text: str,
     *,
-    model: LogisticRegression,
+    model: Any,
     vectorizer: TfidfVectorizer,
     source_name: str,
     project_paths: ProjectPaths = PROJECT_PATHS,
@@ -217,7 +218,7 @@ def predict_single_news(
         cleaned_text=cleaned_text,
         report=SingleTextInferenceReport(
             source_name=source_name,
-            model_type=type(model).__name__,
+            model_type=_get_model_name(model),
             vectorizer_type=type(vectorizer).__name__,
             text_length_chars=len(cleaned_text),
             predicted_label=best_prediction.label,
