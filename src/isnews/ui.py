@@ -14,6 +14,11 @@ from src.isnews.batch_inference_evaluation import (
     BatchInferenceEvaluationResult,
     evaluate_batch_inference,
 )
+from src.isnews.confusion_heatmap_export import (
+    ConfusionHeatmapExportError,
+    ConfusionHeatmapExportResult,
+    export_confusion_heatmaps,
+)
 from src.isnews.batch_error_analysis import (
     BatchErrorAnalysisError,
     BatchErrorAnalysisResult,
@@ -716,6 +721,26 @@ def _render_plot_export_preview(plot_export_result: PlotExportResult) -> None:
         rows.append(f"- график метрик: `{plot_export_result.paths.metrics_plot_path}`;")
     if plot_export_result.paths.comparison_plot_path is not None:
         rows.append(f"- график сравнения моделей: `{plot_export_result.paths.comparison_plot_path}`;")
+    st.markdown("\n".join(rows))
+
+
+def _render_confusion_heatmap_preview(
+    heatmap_result: ConfusionHeatmapExportResult,
+) -> None:
+    """Показывает сведения о выгруженных тепловых картах матриц ошибок."""
+    import streamlit as st
+
+    st.success("PNG-тепловые карты матриц ошибок успешно сформированы.")
+    rows = [
+        f"- выгруженные тепловые карты: `{', '.join(heatmap_result.exported_heatmap_names)}`;",
+        f"- manifest: `{heatmap_result.paths.manifest_path}`;",
+    ]
+    if heatmap_result.paths.validation_heatmap_path is not None:
+        rows.append(f"- validation heatmap: `{heatmap_result.paths.validation_heatmap_path}`;")
+    if heatmap_result.paths.test_heatmap_path is not None:
+        rows.append(f"- test heatmap: `{heatmap_result.paths.test_heatmap_path}`;")
+    if heatmap_result.paths.batch_heatmap_path is not None:
+        rows.append(f"- batch heatmap: `{heatmap_result.paths.batch_heatmap_path}`;")
     st.markdown("\n".join(rows))
 
 
@@ -1903,6 +1928,42 @@ def _render_plot_export_section() -> None:
     _render_plot_export_preview(plot_export_result)
 
 
+def _render_confusion_heatmap_section() -> None:
+    """Отрисовывает блок выгрузки PNG-тепловых карт матриц ошибок."""
+    import streamlit as st
+
+    if "confusion_heatmap_result" not in st.session_state:
+        st.session_state.confusion_heatmap_result = None
+
+    st.subheader("PNG-матрицы ошибок")
+    st.caption(
+        "На этом этапе можно выгрузить PNG-тепловые карты матриц ошибок для "
+        "validation/test и для пакетной оценки на размеченном CSV."
+    )
+
+    if st.button(
+        "Сформировать PNG-матрицы ошибок",
+        use_container_width=True,
+    ):
+        try:
+            st.session_state.confusion_heatmap_result = export_confusion_heatmaps(
+                detailed_evaluation_result=st.session_state.get("detailed_evaluation_result"),
+                batch_evaluation_result=st.session_state.get("batch_inference_evaluation_result"),
+            )
+        except ConfusionHeatmapExportError as error:
+            st.session_state.confusion_heatmap_result = None
+            st.error(str(error))
+
+    confusion_heatmap_result = st.session_state.confusion_heatmap_result
+    if confusion_heatmap_result is None:
+        st.info(
+            "После запуска здесь появятся пути к PNG-тепловым картам матриц ошибок."
+        )
+        return
+
+    _render_confusion_heatmap_preview(confusion_heatmap_result)
+
+
 def _render_evaluation_section(
     split_result: DatasetSplitResult,
     vectorization_result: TfidfVectorizationResult,
@@ -2204,6 +2265,7 @@ def render_main_page() -> None:
     _render_markdown_report_section()
     _render_thesis_tables_section()
     _render_plot_export_section()
+    _render_confusion_heatmap_section()
 
     st.subheader("Базовые директории проекта")
     st.code(
@@ -2239,6 +2301,7 @@ def render_main_page() -> None:
                 f"Каталог Markdown-отчетов: {PROJECT_PATHS.markdown_reports_dir}",
                 f"Каталог CSV-таблиц для ВКР: {PROJECT_PATHS.thesis_tables_reports_dir}",
                 f"Каталог PNG-графиков: {PROJECT_PATHS.plots_reports_dir}",
+                f"Каталог PNG-матриц ошибок: {PROJECT_PATHS.heatmaps_reports_dir}",
             ]
         ),
         language="text",
