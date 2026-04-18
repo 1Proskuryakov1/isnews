@@ -36,6 +36,7 @@ class ProjectPaths:
     comparison_reports_dir: Path
     confidence_reports_dir: Path
     error_analysis_reports_dir: Path
+    html_reports_dir: Path
 
     @classmethod
     def from_root(cls, root: Path | None = None) -> "ProjectPaths":
@@ -68,6 +69,7 @@ class ProjectPaths:
             comparison_reports_dir=resolved_root / "reports" / "comparisons",
             confidence_reports_dir=resolved_root / "reports" / "confidence",
             error_analysis_reports_dir=resolved_root / "reports" / "errors",
+            html_reports_dir=resolved_root / "reports" / "html",
         )
 
     @property
@@ -98,6 +100,7 @@ class ProjectPaths:
             self.comparison_reports_dir,
             self.confidence_reports_dir,
             self.error_analysis_reports_dir,
+            self.html_reports_dir,
         )
 
     def ensure_directories(self) -> None:

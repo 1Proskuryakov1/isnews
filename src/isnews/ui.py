@@ -33,6 +33,11 @@ from src.isnews.experiment_registry import (
     ExperimentRegistryResult,
     export_experiment_registry,
 )
+from src.isnews.html_report_export import (
+    HtmlReportExportError,
+    HtmlReportExportResult,
+    export_session_html_report,
+)
 from src.isnews.logistic_regression_training import (
     LogisticRegressionTrainingError,
     LogisticRegressionTrainingResult,
@@ -609,6 +614,21 @@ def _render_experiment_registry_preview(
 
     st.write("Первые 20 записей реестра:")
     st.dataframe(registry_dataframe.head(20), use_container_width=True)
+
+
+def _render_html_report_preview(html_report_result: HtmlReportExportResult) -> None:
+    """Показывает сведения о сформированном HTML-отчете."""
+    import streamlit as st
+
+    st.success("Краткий HTML-отчет успешно сформирован.")
+    st.markdown(
+        "\n".join(
+            [
+                f"- HTML-файл: `{html_report_result.report_path}`;",
+                f"- включенные разделы: `{', '.join(html_report_result.generated_sections)}`.",
+            ]
+        )
+    )
 
 
 def _render_model_comparison_preview(
@@ -1605,6 +1625,45 @@ def _render_model_comparison_section() -> None:
     _render_model_comparison_preview(comparison_result)
 
 
+def _render_html_report_section() -> None:
+    """Отрисовывает блок формирования краткого HTML-отчета по текущей сессии."""
+    import streamlit as st
+
+    if "html_report_result" not in st.session_state:
+        st.session_state.html_report_result = None
+
+    st.subheader("HTML-отчет")
+    st.caption(
+        "На этом этапе можно собрать краткий HTML-отчет по текущей сессии: "
+        "обучение модели, метрики, сравнение запусков, реестр экспериментов и анализ ошибок."
+    )
+
+    if st.button(
+        "Сформировать HTML-отчет",
+        use_container_width=True,
+    ):
+        try:
+            st.session_state.html_report_result = export_session_html_report(
+                training_result=st.session_state.get("training_result"),
+                evaluation_result=st.session_state.get("evaluation_result"),
+                comparison_result=st.session_state.get("model_comparison_result"),
+                registry_result=st.session_state.get("experiment_registry_result"),
+                error_analysis_result=st.session_state.get("batch_error_analysis_result"),
+            )
+        except HtmlReportExportError as error:
+            st.session_state.html_report_result = None
+            st.error(str(error))
+
+    html_report_result = st.session_state.html_report_result
+    if html_report_result is None:
+        st.info(
+            "После запуска здесь появится путь к HTML-файлу со сводкой по текущим результатам."
+        )
+        return
+
+    _render_html_report_preview(html_report_result)
+
+
 def _render_evaluation_section(
     split_result: DatasetSplitResult,
     vectorization_result: TfidfVectorizationResult,
@@ -1901,6 +1960,7 @@ def render_main_page() -> None:
     _render_batch_inference_section()
     _render_experiment_registry_section()
     _render_model_comparison_section()
+    _render_html_report_section()
 
     st.subheader("Базовые директории проекта")
     st.code(
@@ -1931,6 +1991,7 @@ def render_main_page() -> None:
                 f"Каталог сравнений моделей: {PROJECT_PATHS.comparison_reports_dir}",
                 f"Каталог анализа уверенности предсказаний: {PROJECT_PATHS.confidence_reports_dir}",
                 f"Каталог анализа ошибок: {PROJECT_PATHS.error_analysis_reports_dir}",
+                f"Каталог HTML-отчетов: {PROJECT_PATHS.html_reports_dir}",
             ]
         ),
         language="text",
