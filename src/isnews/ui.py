@@ -8,6 +8,11 @@ from src.isnews.config import PROJECT_PATHS
 from src.isnews.data_loading import DatasetLoadResult, DatasetValidationError
 from src.isnews.data_loading import load_dataset_from_uploaded_bytes, load_dataset_from_url
 from src.isnews.dataset_split import DatasetSplitError, DatasetSplitResult, split_dataset
+from src.isnews.logistic_regression_training import (
+    LogisticRegressionTrainingError,
+    LogisticRegressionTrainingResult,
+    train_logistic_regression,
+)
 from src.isnews.text_preprocessing import TextPreprocessingError, TextPreprocessingResult
 from src.isnews.text_preprocessing import preprocess_dataset
 from src.isnews.tfidf_vectorization import (
@@ -235,12 +240,60 @@ def _render_vectorization_preview(
     st.dataframe(matrix_table, use_container_width=True)
 
 
+def _render_training_preview(
+    training_result: LogisticRegressionTrainingResult,
+) -> None:
+    """Показывает результат обучения базовой модели Logistic Regression."""
+    import streamlit as st
+
+    training_report = training_result.report
+
+    st.success(
+        "Базовая модель Logistic Regression обучена и сохранена."
+    )
+
+    metric_column_1, metric_column_2, metric_column_3, metric_column_4 = st.columns(4)
+    metric_column_1.metric("Классов", len(training_report.class_labels))
+    metric_column_2.metric("Время обучения, сек", training_report.training_seconds)
+    metric_column_3.metric(
+        "Размер coef_",
+        f"{training_report.coefficient_shape[0]} x {training_report.coefficient_shape[1]}",
+    )
+    metric_column_4.metric(
+        "Итераций",
+        ", ".join(str(value) for value in training_report.iterations_per_class),
+    )
+
+    for warning_message in training_report.warning_messages:
+        st.warning(warning_message)
+
+    st.markdown(
+        "\n".join(
+            [
+                f"- классы модели: `{', '.join(training_report.class_labels)}`;",
+                f"- форма `intercept_`: `{training_report.intercept_shape}`;",
+                f"- сохраненная модель: `{training_result.paths.model_path}`;",
+                f"- JSON-отчет: `{training_result.paths.report_path}`.",
+            ]
+        )
+    )
+
+
+def _reset_training_state() -> None:
+    """Сбрасывает состояние обучения при смене признаков или сплита."""
+    import streamlit as st
+
+    st.session_state.training_result = None
+    st.session_state.training_source_key = None
+
+
 def _reset_vectorization_state() -> None:
     """Сбрасывает результат TF-IDF-векторизации при смене сплита."""
     import streamlit as st
 
     st.session_state.vectorization_result = None
     st.session_state.vectorization_source_key = None
+    _reset_training_state()
 
 
 def _reset_split_state() -> None:
@@ -399,6 +452,55 @@ def _render_vectorization_section(split_result: DatasetSplitResult) -> None:
     _render_vectorization_preview(vectorization_result)
 
 
+def _render_training_section(
+    split_result: DatasetSplitResult,
+    vectorization_result: TfidfVectorizationResult,
+) -> None:
+    """Отрисовывает блок обучения базовой модели на TF-IDF признаках."""
+    import streamlit as st
+
+    current_source_key = str(vectorization_result.paths.vectorizer_path)
+    if "training_result" not in st.session_state:
+        st.session_state.training_result = None
+    if "training_source_key" not in st.session_state:
+        st.session_state.training_source_key = None
+
+    if st.session_state.training_source_key != current_source_key:
+        st.session_state.training_result = None
+        st.session_state.training_source_key = current_source_key
+
+    st.subheader("Обучение Logistic Regression")
+    st.caption(
+        "На этом этапе базовый линейный классификатор обучается на `train`-матрице "
+        "TF-IDF признаков и сохраняется в формате `.joblib`."
+    )
+
+    if st.button(
+        "Обучить базовую модель и сохранить классификатор",
+        use_container_width=True,
+    ):
+        try:
+            _reset_training_state()
+            st.session_state.training_result = train_logistic_regression(
+                split_result,
+                vectorization_result,
+            )
+            st.session_state.training_source_key = current_source_key
+        except LogisticRegressionTrainingError as error:
+            st.session_state.training_result = None
+            st.error(str(error))
+
+    training_result = st.session_state.training_result
+    if training_result is None:
+        st.info(
+            "После запуска обучения здесь появятся путь к сохраненной модели, "
+            "время обучения и краткая сводка по параметрам классификатора."
+        )
+        return
+
+    _render_training_preview(training_result)
+
+
 def _render_dataset_preview(dataset_result: DatasetLoadResult) -> None:
     """Показывает краткую сводку о загруженном датасете и первые строки таблицы."""
     import streamlit as st
@@ -521,6 +623,9 @@ def _render_dataset_loading_section() -> None:
     split_result = st.session_state.get("split_result")
     if split_result is not None:
         _render_vectorization_section(split_result)
+    vectorization_result = st.session_state.get("vectorization_result")
+    if split_result is not None and vectorization_result is not None:
+        _render_training_section(split_result, vectorization_result)
 
 
 def render_main_page() -> None:
@@ -574,12 +679,14 @@ def render_main_page() -> None:
                 f"Каталог матриц признаков: {PROJECT_PATHS.feature_data_dir}",
                 f"Каталог моделей: {PROJECT_PATHS.models_dir}",
                 f"Каталог векторизаторов: {PROJECT_PATHS.vectorizers_dir}",
+                f"Каталог классификаторов: {PROJECT_PATHS.classifiers_dir}",
                 f"Каталог ноутбуков: {PROJECT_PATHS.notebooks_dir}",
                 f"Каталог отчетов: {PROJECT_PATHS.reports_dir}",
                 f"Каталог JSON-сводок: {PROJECT_PATHS.dataset_reports_dir}",
                 f"Каталог отчетов предобработки: {PROJECT_PATHS.preprocessing_reports_dir}",
                 f"Каталог отчетов по сплитам: {PROJECT_PATHS.split_reports_dir}",
                 f"Каталог отчетов по векторизации: {PROJECT_PATHS.vectorization_reports_dir}",
+                f"Каталог отчетов по обучению: {PROJECT_PATHS.training_reports_dir}",
             ]
         ),
         language="text",

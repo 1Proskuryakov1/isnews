@@ -20,12 +20,14 @@ class ProjectPaths:
     feature_data_dir: Path
     models_dir: Path
     vectorizers_dir: Path
+    classifiers_dir: Path
     notebooks_dir: Path
     reports_dir: Path
     dataset_reports_dir: Path
     preprocessing_reports_dir: Path
     split_reports_dir: Path
     vectorization_reports_dir: Path
+    training_reports_dir: Path
 
     @classmethod
     def from_root(cls, root: Path | None = None) -> "ProjectPaths":
@@ -42,12 +44,14 @@ class ProjectPaths:
             feature_data_dir=resolved_root / "data" / "features",
             models_dir=resolved_root / "models",
             vectorizers_dir=resolved_root / "models" / "vectorizers",
+            classifiers_dir=resolved_root / "models" / "classifiers",
             notebooks_dir=resolved_root / "notebooks",
             reports_dir=resolved_root / "reports",
             dataset_reports_dir=resolved_root / "reports" / "datasets",
             preprocessing_reports_dir=resolved_root / "reports" / "preprocessing",
             split_reports_dir=resolved_root / "reports" / "splits",
             vectorization_reports_dir=resolved_root / "reports" / "vectorization",
+            training_reports_dir=resolved_root / "reports" / "training",
         )
 
     @property
@@ -62,12 +66,14 @@ class ProjectPaths:
             self.feature_data_dir,
             self.models_dir,
             self.vectorizers_dir,
+            self.classifiers_dir,
             self.notebooks_dir,
             self.reports_dir,
             self.dataset_reports_dir,
             self.preprocessing_reports_dir,
             self.split_reports_dir,
             self.vectorization_reports_dir,
+            self.training_reports_dir,
         )
 
     def ensure_directories(self) -> None:
