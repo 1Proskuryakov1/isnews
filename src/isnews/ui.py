@@ -78,6 +78,11 @@ from src.isnews.single_text_inference import (
     SingleTextInferenceResult,
     predict_single_news,
 )
+from src.isnews.thesis_tables_export import (
+    ThesisTablesExportError,
+    ThesisTablesExportResult,
+    export_thesis_tables,
+)
 from src.isnews.text_preprocessing import TextPreprocessingError, TextPreprocessingResult
 from src.isnews.text_preprocessing import preprocess_dataset
 from src.isnews.tfidf_vectorization import (
@@ -651,6 +656,26 @@ def _render_markdown_report_preview(
             ]
         )
     )
+
+
+def _render_thesis_tables_preview(
+    thesis_tables_result: ThesisTablesExportResult,
+) -> None:
+    """Показывает сведения о выгруженных CSV-таблицах для ВКР."""
+    import streamlit as st
+
+    st.success("CSV-таблицы для ВКР успешно сформированы.")
+    rows = [
+        f"- выгруженные таблицы: `{', '.join(thesis_tables_result.exported_table_names)}`;",
+        f"- manifest: `{thesis_tables_result.paths.manifest_path}`;",
+    ]
+    if thesis_tables_result.paths.metrics_table_path is not None:
+        rows.append(f"- таблица метрик: `{thesis_tables_result.paths.metrics_table_path}`;")
+    if thesis_tables_result.paths.comparison_table_path is not None:
+        rows.append(f"- таблица сравнения моделей: `{thesis_tables_result.paths.comparison_table_path}`;")
+    if thesis_tables_result.paths.error_table_path is not None:
+        rows.append(f"- таблица ошибок: `{thesis_tables_result.paths.error_table_path}`;")
+    st.markdown("\n".join(rows))
 
 
 def _render_model_comparison_preview(
@@ -1725,6 +1750,43 @@ def _render_markdown_report_section() -> None:
     _render_markdown_report_preview(markdown_report_result)
 
 
+def _render_thesis_tables_section() -> None:
+    """Отрисовывает блок выгрузки отдельных CSV-таблиц для ВКР."""
+    import streamlit as st
+
+    if "thesis_tables_result" not in st.session_state:
+        st.session_state.thesis_tables_result = None
+
+    st.subheader("Таблицы для ВКР")
+    st.caption(
+        "На этом этапе можно отдельно выгрузить CSV-таблицы по метрикам, "
+        "сравнению моделей и анализу ошибок для вставки в текст ВКР."
+    )
+
+    if st.button(
+        "Сформировать CSV-таблицы для ВКР",
+        use_container_width=True,
+    ):
+        try:
+            st.session_state.thesis_tables_result = export_thesis_tables(
+                evaluation_result=st.session_state.get("evaluation_result"),
+                comparison_result=st.session_state.get("model_comparison_result"),
+                error_analysis_result=st.session_state.get("batch_error_analysis_result"),
+            )
+        except ThesisTablesExportError as error:
+            st.session_state.thesis_tables_result = None
+            st.error(str(error))
+
+    thesis_tables_result = st.session_state.thesis_tables_result
+    if thesis_tables_result is None:
+        st.info(
+            "После запуска здесь появятся пути к отдельным CSV-таблицам по текущим результатам."
+        )
+        return
+
+    _render_thesis_tables_preview(thesis_tables_result)
+
+
 def _render_evaluation_section(
     split_result: DatasetSplitResult,
     vectorization_result: TfidfVectorizationResult,
@@ -2023,6 +2085,7 @@ def render_main_page() -> None:
     _render_model_comparison_section()
     _render_html_report_section()
     _render_markdown_report_section()
+    _render_thesis_tables_section()
 
     st.subheader("Базовые директории проекта")
     st.code(
@@ -2055,6 +2118,7 @@ def render_main_page() -> None:
                 f"Каталог анализа ошибок: {PROJECT_PATHS.error_analysis_reports_dir}",
                 f"Каталог HTML-отчетов: {PROJECT_PATHS.html_reports_dir}",
                 f"Каталог Markdown-отчетов: {PROJECT_PATHS.markdown_reports_dir}",
+                f"Каталог CSV-таблиц для ВКР: {PROJECT_PATHS.thesis_tables_reports_dir}",
             ]
         ),
         language="text",
