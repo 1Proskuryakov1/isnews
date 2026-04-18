@@ -33,6 +33,11 @@ from src.isnews.detailed_model_evaluation import (
 )
 from src.isnews.data_loading import load_dataset_from_uploaded_bytes, load_dataset_from_url
 from src.isnews.dataset_split import DatasetSplitError, DatasetSplitResult, split_dataset
+from src.isnews.deployment_manifest import (
+    DeploymentManifestError,
+    DeploymentManifestResult,
+    build_deployment_manifest,
+)
 from src.isnews.experiment_registry import (
     ExperimentRegistryError,
     ExperimentRegistryResult,
@@ -873,6 +878,55 @@ def _render_plot_export_preview(
     if plot_export_result.paths.comparison_plot_path is not None:
         rows.append(f"- график сравнения моделей: `{plot_export_result.paths.comparison_plot_path}`;")
     st.markdown("\n".join(rows))
+
+
+def _render_deployment_manifest_preview(
+    deployment_manifest_result: DeploymentManifestResult,
+) -> None:
+    """Показывает сведения о готовности проекта к развёртыванию."""
+    import streamlit as st
+
+    report = deployment_manifest_result.report
+    artifacts_table = pd.DataFrame(
+        [
+            {
+                "Артефакт": artifact.artifact_name,
+                "Путь": artifact.relative_path,
+                "Тип": artifact.artifact_type,
+                "Найден": artifact.exists,
+            }
+            for artifact in deployment_manifest_result.artifacts
+        ]
+    )
+
+    st.success("Манифест развёртывания успешно сформирован.")
+    metric_column_1, metric_column_2, metric_column_3, metric_column_4 = st.columns(4)
+    metric_column_1.metric(
+        "Базовые артефакты",
+        "готово" if report.required_artifacts_ready else "неполно",
+    )
+    metric_column_2.metric("sklearn-моделей", report.detected_model_count)
+    metric_column_3.metric("Векторизаторов", report.detected_vectorizer_count)
+    metric_column_4.metric(
+        "Transformers-моделей",
+        report.detected_transformers_model_count,
+    )
+
+    rows = [
+        f"- target deployment: `{report.deployment_target}`;",
+        f"- JSON-манифест: `{deployment_manifest_result.manifest_path}`;",
+    ]
+    if report.missing_artifacts:
+        rows.append(
+            f"- отсутствующие базовые артефакты: `{', '.join(report.missing_artifacts)}`;"
+        )
+    st.markdown("\n".join(rows))
+
+    for note in report.notes:
+        st.info(note)
+
+    st.write("Список deployment-артефактов:")
+    st.dataframe(artifacts_table, use_container_width=True)
 
 
 def _render_confusion_heatmap_preview(
@@ -2536,6 +2590,50 @@ def _render_confusion_heatmap_section() -> None:
     _render_confusion_heatmap_preview(confusion_heatmap_result)
 
 
+def _render_deployment_manifest_section() -> None:
+    """Отрисовывает блок подготовки манифеста развёртывания приложения."""
+    import streamlit as st
+
+    if "deployment_manifest_result" not in st.session_state:
+        st.session_state.deployment_manifest_result = None
+
+    st.subheader("Манифест развёртывания")
+    st.caption(
+        "На этом этапе можно сформировать JSON-манифест готовности проекта к развёртыванию "
+        "и проверить наличие базовых файлов запуска, моделей и артефактов."
+    )
+    deployment_target = st.selectbox(
+        "Целевой сценарий deployment",
+        options=[
+            "streamlit_local_or_cloud",
+            "streamlit_community_cloud",
+            "colab_demo_bundle",
+        ],
+        key="deployment_target",
+    )
+
+    if st.button(
+        "Сформировать манифест развёртывания",
+        use_container_width=True,
+    ):
+        try:
+            st.session_state.deployment_manifest_result = build_deployment_manifest(
+                deployment_target=deployment_target
+            )
+        except DeploymentManifestError as error:
+            st.session_state.deployment_manifest_result = None
+            st.error(str(error))
+
+    deployment_manifest_result = st.session_state.deployment_manifest_result
+    if deployment_manifest_result is None:
+        st.info(
+            "После запуска здесь появятся JSON-манифест, список обязательных артефактов и краткая сводка по готовности к deployment."
+        )
+        return
+
+    _render_deployment_manifest_preview(deployment_manifest_result)
+
+
 def _render_evaluation_section(
     split_result: DatasetSplitResult,
     vectorization_result: TfidfVectorizationResult,
@@ -2839,6 +2937,7 @@ def render_main_page() -> None:
     _render_thesis_tables_section()
     _render_plot_export_section()
     _render_confusion_heatmap_section()
+    _render_deployment_manifest_section()
 
     st.subheader("Базовые директории проекта")
     st.code(
